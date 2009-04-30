@@ -40,8 +40,8 @@
  *      uchar red;
  *      uchar green;
  *      uchar blue;
- *      uchar hold_time;   // time to hold this color in 100ms steps
- *      uchar morph_time;  // time to morph to the next color in 100ms steps
+ *      uchar morph_time;  // time to morph to the this color in 250ms steps
+ *      uchar hold_time;   // time to hold this color in 250ms steps
  *  }  sequence[sequence_elements];
  *  -----------
  *  The whole sequence is repeated by the orb as soon as the data has been
