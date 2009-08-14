@@ -3,15 +3,16 @@
 
 USBTINY=../usbtiny/usbtiny
 
-TARGET_ARCH = -mmcu=attiny2313
+TARGET_ARCH = -mmcu=attiny44
 AVRDUDE     = avrdude -p t44 -c avrusb500
 FLASH_CMD   = $(AVRDUDE) -e -U flash:w:main.hex
-STACK       = 42
+#STACK       = 42
+STACK       = 128
 FLASH       = 4096
 SRAM        = 256
 OBJECTS     = orb.o
 
-#CFLAGS=-O -mmcu=$(TARGET_ARCH) -Wall -Wstrict-prototypes -Os -mcall-prologues -I. -I$(USBTINY)
+CFLAGS=-O -mmcu=$(TARGET_ARCH) -Wall -Wstrict-prototypes -O3 -mcall-prologues -I. -I$(USBTINY)
 
 include $(USBTINY)/common.mk
 
