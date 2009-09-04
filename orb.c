@@ -113,6 +113,12 @@ struct capabilities_t {
     uchar reserved2;
 };
 
+struct hires_rgb_t {
+    ushort red;
+    ushort green;
+    ushort blue;
+};
+
 uchar sequence_elements = 0;
 struct sequence_t {
     uchar red;
@@ -125,6 +131,7 @@ struct sequence_t {
 struct sequence_t sequence[ MAX_SEQUENCE_LEN ];
 
 bool new_data = false;
+uchar pullup_bit = 0;
 
 #ifndef USBTINY_SERIAL
 #  error "Specify a serial number on the commandline: make USBTINY_SERIAL=ZRH0042"
@@ -133,13 +140,13 @@ bool new_data = false;
 #define PORT_LED PORTA
 enum ColorBits {
     BLUE_BIT  = 0x10,
-    RED_BIT   = 0x08,
     GREEN_BIT = 0x20,
+    RED_BIT   = 0x40,
 
     LED_MASK = RED_BIT | GREEN_BIT | BLUE_BIT
 };
 
-#define DEBUG_MASK 0x40
+#define DEBUG_MASK 0x80
 #define NOP_MASK 0xff
 #define PULLUP_USB_BIT 0x04
 
@@ -160,32 +167,19 @@ static void wait_millis(uchar millis) {
 }
 
 struct time_mask {
-    ushort time;
-    uchar  mask;
+    uchar  mask;        // LED mask
+    ushort time;        // time for the _next_ segment (double buffered OCR1A)
+    uchar next;
 };
 
-struct cycle_segment {
-    struct time_mask a;
-    struct time_mask b;
-};
-
-typedef union {
-    struct time_mask raw[4];
-    struct cycle_segment segment[2];
-} pwm_timings_t;
+struct time_mask segments[4];
 
 volatile uchar active_timing = 0;
-volatile uchar segment = 0;
-pwm_timings_t timings[2];
-
-struct cycle_segment *current_segment;
 
 // The USB interrupts are more important so we'll have our PWM timers be
 // interruptable.
-#if 1
+#if 0
 void TIM1_OVF_vect() __attribute__((interrupt));
-void TIM1_COMPA_vect() __attribute__((interrupt));
-void TIM1_COMPB_vect() __attribute__((interrupt));
 #endif
 
 /*
@@ -201,68 +195,13 @@ static void show_debug(bool on) {
     }
 }
 
-void bottom_half();
-enum Event {
-    EVENT_OVERFLOW = 0x01,
-    EVENT_TIMER_1  = 0x02,
-    EVENT_TIMER_2  = 0x04
-};
-volatile uchar event_queue;
-static void enqueue(enum Event ev) {
-    cli();
-    uchar before = event_queue;
-    event_queue |= ev;
-    sei();
-    if (before) return;
-    bottom_half();
-}
-
-void bottom_half() {
-    while (event_queue) {
-        if (event_queue & EVENT_OVERFLOW) {
-            cli();
-            event_queue &= ~EVENT_OVERFLOW;
-            sei();
-            uchar t = active_timing;
-            current_segment = &timings[t].segment[segment];
-            show_debug(segment == 0);
-            // Now move ahead one segment and set the timers for that segment.
-            // They will be double buffered and set the next time we roll over.
-            segment ^= 1;
-            ushort a = timings[t].segment[segment].a.time;
-            ushort b = timings[t].segment[segment].b.time;
-            cli();
-            OCR1A = a;
-            OCR1B = b;
-            sei();
-        }
-        if (event_queue & EVENT_TIMER_1) {
-            cli();
-            event_queue &= ~EVENT_TIMER_1;
-            sei();
-            if (current_segment->a.mask != NOP_MASK)
-                PORT_LED = (PORT_LED & ~LED_MASK) | current_segment->a.mask;
-        }
-        if (event_queue & EVENT_TIMER_2) {
-            cli();
-            event_queue &= ~EVENT_TIMER_2;
-            sei();
-            if (current_segment->b.mask != NOP_MASK)
-                PORT_LED = (PORT_LED & ~LED_MASK) | current_segment->b.mask;
-        }
-    }
-}
-
+volatile struct time_mask *current;
 ISR(TIM1_OVF_vect) {
-    enqueue(EVENT_OVERFLOW);
-}
-
-ISR(TIM1_COMPA_vect) {   // Counter 1 (16 bit)
-    enqueue(EVENT_TIMER_1);
-}
-
-ISR(TIM1_COMPB_vect) {   // Counter 1 (16 bit)
-    enqueue(EVENT_TIMER_2);
+    PORT_LED = current->mask;
+    current = &segments[current->next];
+    // The timings are double buffered, so we have to set the timer to the _next_
+    // duration here.
+    OCR1A = current->time;
 }
 
 // -- USB
@@ -327,12 +266,14 @@ extern void usb_out( byte_t *data, byte_t len) {
 }
 
 static void timer_init() {
-    // WGM1 = 7 (fast pwm, 1024 TOP)
+    // WGM1 = 15 (fast pwm, OCR1A TOP)
     TCCR1A = (1 << WGM11) | (1 << WGM10);
-    TCCR1B = (1<<WGM12)
+    TCCR1B = (1<<WGM13) | (1<<WGM12)
+        //| (1<<CS12);   // 256 prescale, page 109
         | (1<<CS11) | (1<<CS10);   // 64 prescale, page 109
-    // enable timer 1 interrupt compare A & B match and Overflow
-    TIMSK1 = (1<<OCIE1B) | (1<<OCIE1A) | (1<<TOIE1);
+        //| (1<<CS11);   // 8 prescale, page 109
+    // enable timer 1 Overflow
+    TIMSK1 = (1<<TOIE1);
 }
 
 static void swap(struct time_mask *a, struct time_mask *b) {
@@ -342,176 +283,150 @@ static void swap(struct time_mask *a, struct time_mask *b) {
     *a = tmp;
 }
 
-static void sanitize(bool left, struct time_mask *a) {
-#if 0
-    if (a->time == 1024) {
-        a->time = 512;
-        a->mask = NOP_MASK;
-    }
-#endif
-    if (left) {
-        if (a->time < MIN_DARK_PERIOD)
-            a->time = MIN_DARK_PERIOD;
-    } else {
-        if (a->time > 1024 - MIN_DARK_PERIOD)
-            a->time = 1024 - MIN_DARK_PERIOD;
-    }
+static void swap_int(ushort *a, ushort *b) {
+    ushort tmp;
+    tmp = *b;
+    *b = *a;
+    *a = tmp;
+}
+// for 3 elements, bubblesort is really the simplest and best.
+static void sort(struct time_mask *a, int count) {
+    int i, j;
+    for (i = 0; i < count; ++i)
+        for (j = i; j < count; ++j)
+            if (a[i].time < a[j].time)
+                swap(&a[i], &a[j]);
 }
 
-// Set color, with RGB in range 0..2048
-static void set_color(ushort rgb[3], pwm_timings_t *timings) {
-    /*
-     * Three cases:
-     *  1) 000   all durations less-equal 1024
-     *  2) 100   two less-equal 1024, one more
-     *  3) 110   two bigger than 1024, one less-equal
-     *  4) 111   all durations bigger than 1024
-     *
-     *  1) start the first in the first segment (a), finish at end of that
-     *     segment (b).
-     *     The last two starts in the second segment (a',b') and runs to its
-     *     end.
-     *  2) start the longest in the first segment, let it run to the end of the
-     *     second. Both shorter ones start in the second segment and end
-     *     with it.
-     *  3) Both the big ones start in the first segment and run to the end
-     *     of the second. The lower one starts in the second segment and runs
-     *     to its end.
-     *  4) start the first two in the first segment and let them run to the
-     *     end. Let the third start with the bigger of the two and end it
-     *     somewhere in the second segment (could be end).
-     */
-    timings->raw[0].time = rgb[0];
-    timings->raw[0].mask = RED_BIT;
-    timings->raw[1].time = rgb[1];
-    timings->raw[1].mask = GREEN_BIT;
-    timings->raw[2].time = rgb[2];
-    timings->raw[2].mask = BLUE_BIT;
+void set_color(struct hires_rgb_t *color, struct time_mask *target) {
+    // we calculate the color in place. For that, we use the 'next_time' as
+    // color duration.
+    target[0].mask = pullup_bit;  // 'black' - whole duration.
+    target[0].time = 1023;
 
-    timings->raw[3].time = 0;
-    timings->raw[3].mask = NOP_MASK;
+    target[1].mask = pullup_bit | RED_BIT;
+    target[1].time = color->red;
 
-    // Sorting three elements - one of the rare cases in which bubblesort makes
-    // sense. And uses least amount of code.
-    // Biggest first.
-    uchar i, j;
-    for (j = 0; j < 3; ++j) {
-        for (i = 0; i < 3; ++i) {
-            if (timings->raw[i].time < timings->raw[i+1].time) {
-                swap(&timings->raw[i], &timings->raw[i+1]);
+    target[2].mask = pullup_bit | GREEN_BIT;
+    target[2].time = color->green;
+
+    target[3].mask = pullup_bit | BLUE_BIT;
+    target[3].time = color->blue;
+
+    // The colors need to be sorted: longest first. We already know, that
+    // black is maximum, so we can start sorting from 1
+    sort(&target[1], 3);
+
+    // Chain the results.
+    target[0].next = 1;    // check if this is shorter than loop.
+    target[1].next = 2;
+    target[2].next = 3;
+    target[3].next = 0;
+
+    // Each segment has the bits set from the one before.
+    int i;
+    for (i = 1; i < 4; ++i) {
+        target[i].mask |= target[i-1].mask;
+    }
+
+    // Combine adjacent elements if possible and skip them.
+    uchar s = 0;
+    do {
+        int i;
+        for (i = s + 1; i < 4; ++i) {
+            if (target[i].time == target[s].time) {
+                target[s].next = target[i].next;
+                target[s].mask |= target[i].mask;
             }
         }
+        s = target[s].next;
+    } while (s != 0);
+
+    // Calculate the relative times and fill them in the right spots.
+    s = 0;
+    for (;;) {
+        uchar next = target[s].next;
+        if (next == 0) break;
+        target[s].time = target[s].time - target[next].time;
+        s = next;
     }
 
-    // combine adjacent
-#if 1
-    for (i = 2; i != 255; --i) {
-        if (timings->raw[i].time == timings->raw[i+1].time) {
-            timings->raw[i].mask |= timings->raw[i+1].mask;
-            timings->raw[i+1].mask = timings->raw[i].mask;
-        }
-    }
-#endif
+    // When we start, lets set the debug mask to have a sync pulse.
+    target[0].mask |= DEBUG_MASK;
+}
 
-    if (timings->raw[0].time < 1024) {  // case 1). Biggest value <= 1024
-        timings->raw[0].time = 1023 - timings->raw[0].time;  // 1a: start
+static void set_rgb(uchar r, uchar g, uchar b) {
+    struct hires_rgb_t color;
+    color.red = r * 4;
+    color.green = g * 4;
+    color.blue = b * 4;
+    set_color(&color, &segments[0]);
+}
 
-        timings->raw[3] = timings->raw[1];
-        timings->raw[1].time = 1023;  // 1b: end
-        timings->raw[1].mask = 0;
-
-        timings->raw[2].time = 1023 - timings->raw[2].time;  // 2b : start
-        timings->raw[3].time = 1023 - timings->raw[3].time;  // 2a : start
-
-        // raw2 comes after raw3 so we need to merge it with that mask.
-        timings->raw[2].mask |= timings->raw[3].mask;
-    } else if (timings->raw[1].time < 1024) {  // case 2).
-        timings->raw[0].time = 2048 - timings->raw[0].time;  // a: start
-        timings->raw[3] = timings->raw[1];
-
-        timings->raw[1].time = 512;                          // b: end
-        timings->raw[1].mask = NOP_MASK;
-
-        timings->raw[2].time = 1024 - timings->raw[2].time;
-        timings->raw[2].mask |= timings->raw[0].mask;
-        timings->raw[3].time = 1024 - timings->raw[3].time;
-        timings->raw[3].mask |= timings->raw[2].mask;
-    } else if (timings->raw[2].time < 1024) {  // case 3).
-        timings->raw[0].time = 2048 - timings->raw[0].time; // a: start
-        timings->raw[1].time = 2048 - timings->raw[1].time; // b: start
-        timings->raw[1].mask |= timings->raw[0].mask;
-
-        timings->raw[2].time = 1024 - timings->raw[2].time;
-        timings->raw[3] = timings->raw[2];  // nop. same as first timer.
-    } else {   // case 4
-        timings->raw[0].time = 2048 - timings->raw[0].time; // a: start first
-        timings->raw[0].mask |= timings->raw[2].mask;       //    .. and third
-        timings->raw[1].time = 2048 - timings->raw[1].time; // b: start 2nd
-        timings->raw[1].mask |= timings->raw[0].mask;
-
-        ushort we_run_already = 1024 - timings->raw[0].time;
-        timings->raw[2].time = timings->raw[2].time - we_run_already;
-        timings->raw[2].mask = timings->raw[1].mask & ~timings->raw[2].mask;
-        timings->raw[3] = timings->raw[2];  // nop. same as other timer.
-    }
-
-#if 0
-    // Manual setting.
-    timings->raw[0].time = 1022;
-    timings->raw[0].mask = BLUE_BIT;
-
-    timings->raw[1].time = 1023;
-    timings->raw[1].mask = 0;
-#endif
-
-#if 0
-    timings->raw[2].time = 400;
-    timings->raw[2].mask = BLUE_BIT;
-
-    timings->raw[3].time = 500;
-    timings->raw[3].mask = 0;
-#endif
-
-    // sanitizing.
-#if 0
-    sanitize(true, &timings->raw[0]);
-    sanitize(true, &timings->raw[1]);
-    sanitize(false, &timings->raw[2]);
-    sanitize(false, &timings->raw[3]);
-#endif
+static void blinkenlights() {
+    set_rgb(0, 0, 255);
+    wait_millis(200);
+    set_rgb(255, 0, 0);
+    wait_millis(200);
+    set_rgb(255, 255, 0);
+    wait_millis(200);
+    set_rgb(0, 0, 255);
+    wait_millis(200);
+    set_rgb(0, 255, 0);
+    wait_millis(200);
+    set_rgb(255, 0, 0);
+    wait_millis(200);
 }
 
 int main(void)
 {
 
-    DDRA = LED_MASK | PULLUP_USB_BIT;
+    DDRA = LED_MASK | PULLUP_USB_BIT | DEBUG_MASK;
 
     PORT_LED &= ~PULLUP_USB_BIT;
 
-    event_queue = 0;
-    segment = 0;
-    active_timing = 0;
-    ushort colors[] = { 40, 0, 0 };
-    set_color(colors, &timings[active_timing]);
+    struct hires_rgb_t color;
 
     usb_init();
-    timer_init();
-    //startup_blinkenlight();
 
-    PORT_LED |= PULLUP_USB_BIT;
+    current = &segments[0];
 
+    //timer_init();
+    //OCR1A = 1;
+
+    //blinkenlights();
+
+    // Now, enable the pullup bit for USB in all following color settings.
+    pullup_bit = PULLUP_USB_BIT;
+    set_rgb(0, 0, 0);
+
+    current[0].time = 7;
+    current[0].mask = PULLUP_USB_BIT | RED_BIT;
+    current[0].next = 1;
+
+    current[1].time = 512;
+    current[1].mask = PULLUP_USB_BIT;
+    current[1].next = 0;
+
+    int pwm = 0;
+    int trigger = current->time;
     for (;;) {
         usb_poll();
         if (new_data) {
-            colors[0] = sequence[0].red * 8;
-            colors[1] = sequence[0].green * 8;
-            colors[2] = sequence[0].blue * 8;
-            uchar next_active = active_timing ^ 1;
-            set_color(colors, &timings[next_active]);
-            active_timing = next_active;
-            // TODO: set this to true and see how things flicker
+            color.red = sequence[0].red * 4;
+            color.green = sequence[0].green * 4;
+            color.blue = sequence[0].blue * 4;
+            set_color(&color, &segments[0]);
             new_data = false;
         }
+
+        if (pwm >= trigger) {
+            PORT_LED = current->mask;
+            trigger = current->time;
+            pwm = 0;
+            current = &segments[current->next];
+        }
+        pwm++;
     }
     return 0;
 }

@@ -56,15 +56,15 @@ fuse_2313:
 # 1 bodlevel1	0 +  brown out detection 2.7 Volt (page 38)
 # 0 bodlevel0	1/
 #
-### Fuse low byte: 0xEF
+### Fuse low byte: 0xCE
 # 7 ckdiv8	1   divide by 8: no
 # 6 ckout	1   clk out: disabled.
-# 5 sut1	1-+ crystal oscillator, fast rising power.
+# 5 sut1	0-+ ceramic oscillator, slow rising power (page 28)
 # 4 sut0	0/
 #
 # 3 cksel3	1\
 # 2 cksel2	1 + crystal >=8 Mhz  (page 26)
 # 1 cksel1	1/
-# 0 cksel0	1   chrystal with SUT 10 -> crystal oscillator, fast rising power.
+# 0 cksel0	0 ceramic osc SUT 10 -> crystal oscillator, fast rising power.
 fuse_44:
-	$(AVRDUDE) -U hfuse:w:0xdd:m -U lfuse:w:0xef:m
+	$(AVRDUDE) -U hfuse:w:0xdd:m -U lfuse:w:0xce:m
