@@ -73,7 +73,7 @@
 // When this macro is defined as 1, an optimized CRC function is used
 // that calculates the CRC about twice as fast as the standard version,
 // but at the expense of 30 bytes of additional flash memory.
-#define	USBTINY_FAST_CRC		0
+#define	USBTINY_FAST_CRC		1
 
 // Set the macro USBTINY_ENDPOINT to 1 to add an additional endpoint,
 // according to the values of the three other macros.

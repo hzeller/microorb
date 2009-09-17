@@ -89,6 +89,9 @@ typedef unsigned char	bool;
 #define false 0
 #define MAX_SEQUENCE_LEN 5
 
+// emperically determined PWM frequency: used to calculate what a morph-step is.
+#define PWM_FREQUENCY_HZ 100
+
 enum Request {
     ORB_SETSEQUENCE,
     ORB_GETCAPABILITIES,
@@ -128,6 +131,19 @@ struct sequence_t {
     uchar hold_time;   // time to hold this color in 250ms steps
 };
 
+struct fixvalue_t {
+    uint32_t value;   // upper 8 bit: value.
+    int32_t diff;    // changes do be done.
+};
+
+struct morph_t {
+    struct fixvalue_t red;
+    struct fixvalue_t green;
+    struct fixvalue_t blue;
+    ushort morph_iterations;
+    ushort hold_iterations;
+};
+
 struct sequence_t sequence[ MAX_SEQUENCE_LEN ];
 
 bool new_data = false;
@@ -150,14 +166,6 @@ enum ColorBits {
 #define NOP_MASK 0xff
 #define PULLUP_USB_BIT 0x04
 
-/*
- * On overflow of the start period (at BOTTOM), we set the LEDs to dark.
- * While this interrupt is processing, no COMPA/COMPB interrupts must be firing
- * because they might set the LEDs to ON before we've set them to OFF
- * (recursive interrupts are enabled)
- */
-#define MIN_DARK_PERIOD 2
-
 // wait up to 255 milliseconds.
 static void wait_millis(uchar millis) {
     uchar i;
@@ -168,41 +176,12 @@ static void wait_millis(uchar millis) {
 
 struct time_mask {
     uchar  mask;        // LED mask
-    ushort time;        // time for the _next_ segment (double buffered OCR1A)
-    uchar next;
+    ushort time;        // point in time.
 };
 
-struct time_mask segments[4];
+struct time_mask segments[3];
 
 volatile uchar active_timing = 0;
-
-// The USB interrupts are more important so we'll have our PWM timers be
-// interruptable.
-#if 0
-void TIM1_OVF_vect() __attribute__((interrupt));
-#endif
-
-/*
- * - Three interrupts call function event with parameter values
- * - function cli() set action sti() while (action) { }
- */
-
-static void show_debug(bool on) {
-    if (on) {
-        PORT_LED = (PORT_LED & ~LED_MASK) | DEBUG_MASK;
-    } else {
-        PORT_LED = PORT_LED & ~DEBUG_MASK;
-    }
-}
-
-volatile struct time_mask *current;
-ISR(TIM1_OVF_vect) {
-    PORT_LED = current->mask;
-    current = &segments[current->next];
-    // The timings are double buffered, so we have to set the timer to the _next_
-    // duration here.
-    OCR1A = current->time;
-}
 
 // -- USB
 static enum InputMode { NO_INPUT, SET_COLOR, SET_AUX } input_mode = NO_INPUT;
@@ -212,6 +191,7 @@ extern byte_t usb_setup ( byte_t data[8] )
     switch (data[1]) {
     case ORB_SETSEQUENCE: 
         input_mode = SET_COLOR;
+        // receive data in usb_out();
         break;
 
     case ORB_GETCAPABILITIES: {
@@ -243,28 +223,42 @@ extern byte_t usb_setup ( byte_t data[8] )
     return retval;
 }
 
+struct fill_tracker {
+    uchar sequence_elements;
+    char* data;
+    uchar bytes_left;
+} ft;
 
 extern void usb_out( byte_t *data, byte_t len) {
     switch (input_mode) {
     case SET_COLOR: {
-        if (len == 0 || data[0] * sizeof(struct sequence_t) != len - 1)
-            return;
-        sequence_elements = ((data[0] <= MAX_SEQUENCE_LEN)
-                             ? data[0]
-                             : MAX_SEQUENCE_LEN);
-        memcpy(sequence, &data[1],
-               sequence_elements * sizeof(struct sequence_t));
-        new_data = true;
+        if (ft.bytes_left == 0) {  // new start.
+            ft.sequence_elements = ((data[0] <= MAX_SEQUENCE_LEN)
+                                              ? data[0]
+                                    : MAX_SEQUENCE_LEN);
+            ++data; --len;  // consumed first byte.
+            ft.data = (char*) &sequence;
+            ft.bytes_left = ft.sequence_elements * sizeof(struct sequence_t);
+        }
+        if (ft.bytes_left >= len) {
+            memcpy(ft.data, data, len);
+            ft.bytes_left -= len;
+            ft.data += len;
+        }
+        if (ft.bytes_left == 0) {
+            new_data = true;
+            sequence_elements = ft.sequence_elements;
+            input_mode = NO_INPUT;
+        }
     }
         break;
 
     default:
         ;
     }
-
-    input_mode = NO_INPUT;
 }
 
+#if 0
 static void timer_init() {
     // WGM1 = 15 (fast pwm, OCR1A TOP)
     TCCR1A = (1 << WGM11) | (1 << WGM10);
@@ -275,6 +269,7 @@ static void timer_init() {
     // enable timer 1 Overflow
     TIMSK1 = (1<<TOIE1);
 }
+#endif
 
 static void swap(struct time_mask *a, struct time_mask *b) {
     static struct time_mask tmp;  // not on stack. Makes accounting simpler.
@@ -289,93 +284,94 @@ static void swap_int(ushort *a, ushort *b) {
     *b = *a;
     *a = tmp;
 }
+
 // for 3 elements, bubblesort is really the simplest and best.
 static void sort(struct time_mask *a, int count) {
     int i, j;
-    for (i = 0; i < count; ++i)
-        for (j = i; j < count; ++j)
-            if (a[i].time < a[j].time)
+    for (i = 0; i < count; ++i) {
+        for (j = i; j < count; ++j) {
+            if (a[i].time > a[j].time) {
                 swap(&a[i], &a[j]);
+            }
+        }
+    }
 }
 
 void set_color(struct hires_rgb_t *color, struct time_mask *target) {
-    // we calculate the color in place. For that, we use the 'next_time' as
-    // color duration.
-    target[0].mask = pullup_bit;  // 'black' - whole duration.
-    target[0].time = 1023;
+    target[0].mask = PULLUP_USB_BIT | (color->red > 0 ? RED_BIT : 0);
+    target[0].time = 1023 - color->red;
 
-    target[1].mask = pullup_bit | RED_BIT;
-    target[1].time = color->red;
+    target[1].mask = PULLUP_USB_BIT | (color->green > 0 ? GREEN_BIT : 0);
+    target[1].time = 1023 - color->green;
 
-    target[2].mask = pullup_bit | GREEN_BIT;
-    target[2].time = color->green;
+    target[2].mask = PULLUP_USB_BIT | (color->blue > 0 ? BLUE_BIT : 0);
+    target[2].time = 1023 - color->blue;
 
-    target[3].mask = pullup_bit | BLUE_BIT;
-    target[3].time = color->blue;
-
-    // The colors need to be sorted: longest first. We already know, that
-    // black is maximum, so we can start sorting from 1
-    sort(&target[1], 3);
-
-    // Chain the results.
-    target[0].next = 1;    // check if this is shorter than loop.
-    target[1].next = 2;
-    target[2].next = 3;
-    target[3].next = 0;
+    // Longest time duration first.
+    sort(target, 3);
 
     // Each segment has the bits set from the one before.
-    int i;
-    for (i = 1; i < 4; ++i) {
-        target[i].mask |= target[i-1].mask;
-    }
-
-    // Combine adjacent elements if possible and skip them.
-    uchar s = 0;
-    do {
-        int i;
-        for (i = s + 1; i < 4; ++i) {
-            if (target[i].time == target[s].time) {
-                target[s].next = target[i].next;
-                target[s].mask |= target[i].mask;
-            }
-        }
-        s = target[s].next;
-    } while (s != 0);
-
-    // Calculate the relative times and fill them in the right spots.
-    s = 0;
-    for (;;) {
-        uchar next = target[s].next;
-        if (next == 0) break;
-        target[s].time = target[s].time - target[next].time;
-        s = next;
-    }
+    target[1].mask |= target[0].mask;
+    target[2].mask |= target[1].mask;
 
     // When we start, lets set the debug mask to have a sync pulse.
     target[0].mask |= DEBUG_MASK;
 }
 
-static void set_rgb(uchar r, uchar g, uchar b) {
-    struct hires_rgb_t color;
-    color.red = r * 4;
-    color.green = g * 4;
-    color.blue = b * 4;
-    set_color(&color, &segments[0]);
+static ushort gamma_correct(uchar c) {
+    return 4 * c;   // not yet ;)
 }
 
-static void blinkenlights() {
-    set_rgb(0, 0, 255);
-    wait_millis(200);
-    set_rgb(255, 0, 0);
-    wait_millis(200);
-    set_rgb(255, 255, 0);
-    wait_millis(200);
-    set_rgb(0, 0, 255);
-    wait_millis(200);
-    set_rgb(0, 255, 0);
-    wait_millis(200);
-    set_rgb(255, 0, 0);
-    wait_millis(200);
+static void set_rgb(uchar r, uchar g, uchar b) {
+    struct hires_rgb_t color;
+    color.red = gamma_correct(r);
+    color.green = gamma_correct(g);
+    color.blue = gamma_correct(b);
+    set_color(&color, segments);
+}
+
+void set_fixvalue_register(int32_t from, int32_t to, int32_t iterations,
+                           struct fixvalue_t *out) {
+    out->value = from << 21;
+    if (iterations != 0)
+        out->diff = (to - from) * 2048 * 1024 / iterations;
+}
+
+static inline void increment_fixvalue(struct fixvalue_t *value) {
+    value->value += value->diff;
+}
+
+void prepare_morph(const struct sequence_t* prev,
+                   const struct sequence_t *target,
+                   struct morph_t *morph) {
+    morph->morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
+    morph->hold_iterations = PWM_FREQUENCY_HZ / 4 * target->hold_time;
+    set_fixvalue_register(prev->red, target->red,
+                          morph->morph_iterations, &morph->red);
+    set_fixvalue_register(prev->green, target->green,
+                          morph->morph_iterations, &morph->green);
+    set_fixvalue_register(prev->blue, target->blue,
+                          morph->morph_iterations, &morph->blue);
+}
+
+// Morph and return 'false' if next morph cycle needs to be calculated.
+static bool do_morph(struct morph_t *morph) {
+    set_rgb(morph->red.value >> 21,
+            morph->green.value >> 21,
+            morph->blue.value >> 21);
+    if (morph->morph_iterations != 0) {
+        increment_fixvalue(&morph->red);
+        increment_fixvalue(&morph->green);
+        increment_fixvalue(&morph->blue);
+        --morph->morph_iterations;
+    }
+    else if (morph->hold_iterations != 0) {
+        --morph->hold_iterations;
+    }
+    else {
+        return false;
+    }
+    return true;
 }
 
 int main(void)
@@ -385,48 +381,71 @@ int main(void)
 
     PORT_LED &= ~PULLUP_USB_BIT;
 
-    struct hires_rgb_t color;
-
     usb_init();
 
-    current = &segments[0];
-
-    //timer_init();
-    //OCR1A = 1;
-
-    //blinkenlights();
-
-    // Now, enable the pullup bit for USB in all following color settings.
-    pullup_bit = PULLUP_USB_BIT;
     set_rgb(0, 0, 0);
-
-    current[0].time = 7;
-    current[0].mask = PULLUP_USB_BIT | RED_BIT;
-    current[0].next = 1;
-
-    current[1].time = 512;
-    current[1].mask = PULLUP_USB_BIT;
-    current[1].next = 0;
-
+    static struct hires_rgb_t color;
+    static struct morph_t morph;
+    morph.morph_iterations = 0;
+    morph.hold_iterations = 0;
+    ft.bytes_left = 0;
     int pwm = 0;
-    int trigger = current->time;
+    uchar s = 0;
+    ushort trigger = segments[s].time;
+
+    PORT_LED = PULLUP_USB_BIT;
+
+    uchar current_sequence = 0;
+
+    sequence[0].red = 255;
+    sequence[0].green = 0;
+    sequence[0].blue = 0;
+    sequence[0].morph_time = 1;
+    sequence[0].hold_time = 0;
+
+    sequence[1].red = 0;
+    sequence[1].green = 0;
+    sequence[1].blue = 0;
+    sequence[1].morph_time = 1;
+    sequence[1].hold_time = 0;
+
+    sequence[2].red = 0;
+    sequence[2].green = 255;
+    sequence[2].blue = 0;
+    sequence[2].morph_time = 30;
+    sequence[2].hold_time = 0;
+
+    sequence_elements = 2;
+
     for (;;) {
         usb_poll();
+#if 0
         if (new_data) {
-            color.red = sequence[0].red * 4;
-            color.green = sequence[0].green * 4;
-            color.blue = sequence[0].blue * 4;
-            set_color(&color, &segments[0]);
+            set_rgb(sequence[0].red, sequence[0].green, sequence[0].blue);
             new_data = false;
-        }
-
-        if (pwm >= trigger) {
-            PORT_LED = current->mask;
-            trigger = current->time;
             pwm = 0;
-            current = &segments[current->next];
+            s = 0;
+            trigger = segments[s].time;
         }
-        pwm++;
+#endif
+        if (pwm++ >= trigger) {
+            PORT_LED = segments[s].mask;
+            ++s;   // this could count backwards and compare against 0.
+            if (s > 3) {
+                s = 0;
+                pwm = 0;
+                PORT_LED = PULLUP_USB_BIT;  // all off.
+                if (!do_morph(&morph) && sequence_elements > 0) {
+                    uchar next_sequence
+                        = (current_sequence + 1) % sequence_elements;
+                    prepare_morph(&sequence[current_sequence],
+                                  &sequence[next_sequence],
+                                  &morph);
+                    current_sequence = next_sequence;
+                }
+            }
+            trigger = segments[s].time;
+        }
     }
     return 0;
 }
