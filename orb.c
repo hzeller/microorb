@@ -319,7 +319,10 @@ void set_color(struct hires_rgb_t *color, struct time_mask *target) {
 }
 
 static ushort gamma_correct(uchar c) {
-    return 4 * c;   // not yet ;)
+    // Simplified gamma ~= 2.2
+    if (c < 64) return c;
+    if (c < 128) return (c - 63) * 3 + 63;
+    return (c - 127) * 6 + 255;
 }
 
 static void set_rgb(uchar r, uchar g, uchar b) {
@@ -419,7 +422,7 @@ int main(void)
 
     for (;;) {
         usb_poll();
-#if 0
+#if 1
         if (new_data) {
             set_rgb(sequence[0].red, sequence[0].green, sequence[0].blue);
             new_data = false;
@@ -435,6 +438,7 @@ int main(void)
                 s = 0;
                 pwm = 0;
                 PORT_LED = PULLUP_USB_BIT;  // all off.
+#if 1
                 if (!do_morph(&morph) && sequence_elements > 0) {
                     uchar next_sequence
                         = (current_sequence + 1) % sequence_elements;
@@ -443,6 +447,7 @@ int main(void)
                                   &morph);
                     current_sequence = next_sequence;
                 }
+#endif
             }
             trigger = segments[s].time;
         }
