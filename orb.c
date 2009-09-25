@@ -179,7 +179,7 @@ struct time_mask {
     ushort time;        // point in time.
 };
 
-struct time_mask segments[3];
+struct time_mask segments[4];
 
 volatile uchar active_timing = 0;
 
@@ -278,18 +278,11 @@ static void swap(struct time_mask *a, struct time_mask *b) {
     *a = tmp;
 }
 
-static void swap_int(ushort *a, ushort *b) {
-    ushort tmp;
-    tmp = *b;
-    *b = *a;
-    *a = tmp;
-}
-
 // for 3 elements, bubblesort is really the simplest and best.
 static void sort(struct time_mask *a, int count) {
     int i, j;
     for (i = 0; i < count; ++i) {
-        for (j = i; j < count; ++j) {
+        for (j = i + 1; j < count; ++j) {
             if (a[i].time > a[j].time) {
                 swap(&a[i], &a[j]);
             }
@@ -307,7 +300,7 @@ void set_color(struct hires_rgb_t *color, struct time_mask *target) {
     target[2].mask = PULLUP_USB_BIT | (color->blue > 0 ? BLUE_BIT : 0);
     target[2].time = 1023 - color->blue;
 
-    // Longest time duration first.
+    // Sort in sequence when it has to be switched on.
     sort(target, 3);
 
     // Each segment has the bits set from the one before.
@@ -315,7 +308,7 @@ void set_color(struct hires_rgb_t *color, struct time_mask *target) {
     target[2].mask |= target[1].mask;
 
     // When we start, lets set the debug mask to have a sync pulse.
-    target[0].mask |= DEBUG_MASK;
+    //target[0].mask |= DEBUG_MASK;
 }
 
 static ushort gamma_correct(uchar c) {
@@ -377,29 +370,7 @@ static bool do_morph(struct morph_t *morph) {
     return true;
 }
 
-int main(void)
-{
-
-    DDRA = LED_MASK | PULLUP_USB_BIT | DEBUG_MASK;
-
-    PORT_LED &= ~PULLUP_USB_BIT;
-
-    usb_init();
-
-    set_rgb(0, 0, 0);
-    static struct hires_rgb_t color;
-    static struct morph_t morph;
-    morph.morph_iterations = 0;
-    morph.hold_iterations = 0;
-    ft.bytes_left = 0;
-    int pwm = 0;
-    uchar s = 0;
-    ushort trigger = segments[s].time;
-
-    PORT_LED = PULLUP_USB_BIT;
-
-    uchar current_sequence = 0;
-
+static void set_init_sequence() {
     sequence[0].red = 255;
     sequence[0].green = 0;
     sequence[0].blue = 0;
@@ -419,10 +390,40 @@ int main(void)
     sequence[2].hold_time = 0;
 
     sequence_elements = 2;
+}
+
+int main(void)
+{
+
+    DDRA = LED_MASK | PULLUP_USB_BIT | DEBUG_MASK;
+
+    PORT_LED &= ~PULLUP_USB_BIT;
+
+    usb_init();
+
+    // End of segments.
+    segments[3].time = 1023;
+    segments[3].mask = PULLUP_USB_BIT;
+
+    set_rgb(0, 0, 0);
+
+    static struct hires_rgb_t color;
+    static struct morph_t morph;
+    morph.morph_iterations = 0;
+    morph.hold_iterations = 0;
+    ft.bytes_left = 0;
+    ushort pwm = 0;
+    uchar s = 0;
+    ushort trigger = segments[s].time;
+
+    PORT_LED = PULLUP_USB_BIT;
+
+    set_init_sequence();
+    uchar current_sequence = 0;
 
     for (;;) {
         usb_poll();
-#if 1
+
         if (new_data) {
             set_rgb(sequence[0].red, sequence[0].green, sequence[0].blue);
             new_data = false;
@@ -430,14 +431,14 @@ int main(void)
             s = 0;
             trigger = segments[s].time;
         }
-#endif
+
         if (pwm++ >= trigger) {
             PORT_LED = segments[s].mask;
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
+                PORT_LED |= DEBUG_MASK;
                 s = 0;
                 pwm = 0;
-                PORT_LED = PULLUP_USB_BIT;  // all off.
 #if 1
                 if (!do_morph(&morph) && sequence_elements > 0) {
                     uchar next_sequence
