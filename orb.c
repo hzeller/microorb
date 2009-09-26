@@ -87,10 +87,10 @@ typedef unsigned char	bool;
 
 #define true  1
 #define false 0
-#define MAX_SEQUENCE_LEN 5
+#define MAX_SEQUENCE_LEN 7
 
 // emperically determined PWM frequency: used to calculate what a morph-step is.
-#define PWM_FREQUENCY_HZ 100
+#define PWM_FREQUENCY_HZ 200
 
 enum Request {
     ORB_SETSEQUENCE,
@@ -104,9 +104,7 @@ enum CapabilityFlags {
     HAS_GET_COLOR      = 0x01,
     HAS_GET_SEQUENCE   = 0x02,
     HAS_AUX            = 0x04,
-    /* suggested, not yet used */
-    HAS_MORPH          = 0x08,
-    DOES_GAMMA_CORRECT = 0x10
+    HAS_GAMMA_CORRECT  = 0x08
     /* more to come */
 };
 struct capabilities_t {
@@ -144,7 +142,7 @@ struct morph_t {
     ushort hold_iterations;
 };
 
-struct sequence_t sequence[ MAX_SEQUENCE_LEN ];
+static struct sequence_t sequence[ MAX_SEQUENCE_LEN ];
 
 bool new_data = false;
 uchar pullup_bit = 0;
@@ -196,7 +194,7 @@ extern byte_t usb_setup ( byte_t data[8] )
 
     case ORB_GETCAPABILITIES: {
         struct capabilities_t *cap = (struct capabilities_t*) data;
-        cap->flags = HAS_GET_COLOR;
+        cap->flags = HAS_GET_COLOR | HAS_GAMMA_CORRECT;
         cap->max_sequence_len = MAX_SEQUENCE_LEN;
         cap->version = 1;
         cap->reserved2 = 0;
@@ -328,26 +326,29 @@ static void set_rgb(uchar r, uchar g, uchar b) {
 
 void set_fixvalue_register(int32_t from, int32_t to, int32_t iterations,
                            struct fixvalue_t *out) {
-    out->value = from << 21;
-    if (iterations != 0)
+    if (iterations != 0) {
+        out->value = from << 21;
         out->diff = (to - from) * 2048 * 1024 / iterations;
+    } else {
+        out->value = to << 21;   // unsigned mul with 2048 * 1024
+    }
 }
 
 static inline void increment_fixvalue(struct fixvalue_t *value) {
     value->value += value->diff;
 }
 
-void prepare_morph(const struct sequence_t* prev,
+void prepare_morph(const struct sequence_t *prev,
                    const struct sequence_t *target,
                    struct morph_t *morph) {
     morph->morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
     morph->hold_iterations = PWM_FREQUENCY_HZ / 4 * target->hold_time;
-    set_fixvalue_register(prev->red, target->red,
-                          morph->morph_iterations, &morph->red);
-    set_fixvalue_register(prev->green, target->green,
-                          morph->morph_iterations, &morph->green);
-    set_fixvalue_register(prev->blue, target->blue,
-                          morph->morph_iterations, &morph->blue);
+    set_fixvalue_register(prev->red, target->red, morph->morph_iterations,
+                          &morph->red);
+    set_fixvalue_register(prev->green, target->green, morph->morph_iterations,
+                          &morph->green);
+    set_fixvalue_register(prev->blue, target->blue, morph->morph_iterations,
+                          &morph->blue);
 }
 
 // Morph and return 'false' if next morph cycle needs to be calculated.
@@ -355,15 +356,18 @@ static bool do_morph(struct morph_t *morph) {
     set_rgb(morph->red.value >> 21,
             morph->green.value >> 21,
             morph->blue.value >> 21);
+    // first we count down all morph iterations ..
     if (morph->morph_iterations != 0) {
         increment_fixvalue(&morph->red);
         increment_fixvalue(&morph->green);
         increment_fixvalue(&morph->blue);
         --morph->morph_iterations;
     }
+    // .. then continue with the hold iterations.
     else if (morph->hold_iterations != 0) {
         --morph->hold_iterations;
     }
+    // .. until we're done.
     else {
         return false;
     }
@@ -409,6 +413,9 @@ int main(void)
 
     static struct hires_rgb_t color;
     static struct morph_t morph;
+    morph.red.value = 0;
+    morph.green.value = 0;
+    morph.blue.value = 0;
     morph.morph_iterations = 0;
     morph.hold_iterations = 0;
     ft.bytes_left = 0;
@@ -425,11 +432,11 @@ int main(void)
         usb_poll();
 
         if (new_data) {
-            set_rgb(sequence[0].red, sequence[0].green, sequence[0].blue);
-            new_data = false;
-            pwm = 0;
-            s = 0;
-            trigger = segments[s].time;
+            if (sequence_elements > 0) {
+                current_sequence = sequence_elements - 1;
+            } else {
+                set_rgb(sequence[0].red, sequence[0].green, sequence[0].blue);
+            }
         }
 
         if (pwm++ >= trigger) {
@@ -439,16 +446,16 @@ int main(void)
                 PORT_LED |= DEBUG_MASK;
                 s = 0;
                 pwm = 0;
-#if 1
-                if (!do_morph(&morph) && sequence_elements > 0) {
+                if ((new_data || !do_morph(&morph)) && sequence_elements > 0) {
+                    new_data = false;
                     uchar next_sequence
                         = (current_sequence + 1) % sequence_elements;
+                    // TODO: instead of current_seq, take current color here.
                     prepare_morph(&sequence[current_sequence],
                                   &sequence[next_sequence],
                                   &morph);
                     current_sequence = next_sequence;
                 }
-#endif
             }
             trigger = segments[s].time;
         }

@@ -7,7 +7,7 @@ TARGET_ARCH = -mmcu=attiny44
 AVRDUDE     = avrdude -p t44 -c avrusb500
 FLASH_CMD   = $(AVRDUDE) -e -U flash:w:main.hex
 #STACK       = 42
-STACK       = 128
+STACK       = 100
 FLASH       = 4096
 SRAM        = 256
 OBJECTS     = orb.o
