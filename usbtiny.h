@@ -35,7 +35,7 @@
 #define	USBTINY_DEVICE_ID		0xF00D
 
 // The version of the device as a 16-bit number: 256*major + minor.
-#define	USBTINY_DEVICE_VERSION		0x103
+#define	USBTINY_DEVICE_VERSION		0x104
 
 // The following optional macros may be used as an identification of
 // your device. Undefine them when you run out of flash space.

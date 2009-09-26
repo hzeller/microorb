@@ -87,7 +87,7 @@ typedef unsigned char	bool;
 
 #define true  1
 #define false 0
-#define MAX_SEQUENCE_LEN 7
+#define MAX_SEQUENCE_LEN 8
 
 // emperically determined PWM frequency: used to calculate what a morph-step is.
 #define PWM_FREQUENCY_HZ 200
@@ -114,17 +114,14 @@ struct capabilities_t {
     uchar reserved2;
 };
 
-struct hires_rgb_t {
-    ushort red;
-    ushort green;
-    ushort blue;
-};
-
-uchar sequence_elements = 0;
-struct sequence_t {
+struct rgb_t {
     uchar red;
     uchar green;
     uchar blue;
+};
+
+struct sequence_t {
+    struct rgb_t col;
     uchar morph_time;  // time to morph to the this color in 250ms steps
     uchar hold_time;   // time to hold this color in 250ms steps
 };
@@ -142,26 +139,43 @@ struct morph_t {
     ushort hold_iterations;
 };
 
-static struct sequence_t sequence[ MAX_SEQUENCE_LEN ];
+// We prefill our sequence elements with the Google colors
+// as the switch-on sequence
+static uchar sequence_elements = 8;
+static struct sequence_t sequence[ MAX_SEQUENCE_LEN ] = {
+    { { 0x00, 0x00, 0x00 }, 0, 2 },   // initial black.
+    { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
+    { { 0xff, 0x00, 0x00 }, 1, 2 },   // o - red
+    { { 0xff, 0xff, 0x00 }, 1, 2 },   // o - yellow
+    { { 0x00, 0x00, 0xff }, 1, 2 },   // g - blue
+    { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
+    { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
+    { { 0x00, 0x00, 0x00 }, 1, 255 }  // black for some time.
+};
 
 bool new_data = false;
-uchar pullup_bit = 0;
 
 #ifndef USBTINY_SERIAL
 #  error "Specify a serial number on the commandline: make USBTINY_SERIAL=ZRH0042"
 #endif
 
-#define PORT_LED PORTA
-enum ColorBits {
+#define OUT_PORT PORTA
+enum {
+    // 0x01, 0x02 used by usb.
+
+    PULLUP_USB_BIT = 0x04,
+
+    // 0x08 - N/C
+
     BLUE_BIT  = 0x10,
     GREEN_BIT = 0x20,
     RED_BIT   = 0x40,
+    LED_MASK  = RED_BIT | GREEN_BIT | BLUE_BIT,
 
-    LED_MASK = RED_BIT | GREEN_BIT | BLUE_BIT
+    DEBUG_MASK = 0x80
 };
 
 #define DEBUG_MASK 0x80
-#define NOP_MASK 0xff
 #define PULLUP_USB_BIT 0x04
 
 // wait up to 255 milliseconds.
@@ -288,27 +302,26 @@ static void sort(struct time_mask *a, int count) {
     }
 }
 
-void set_color(struct hires_rgb_t *color, struct time_mask *target) {
-    target[0].mask = PULLUP_USB_BIT | (color->red > 0 ? RED_BIT : 0);
-    target[0].time = 1023 - color->red;
+// Set color with already gamma corrected short values [0..1023]
+void set_color(ushort r, ushort g, ushort b, struct time_mask *target) {
+    target[0].mask = PULLUP_USB_BIT | (r > 0 ? RED_BIT : 0);
+    target[0].time = 1023 - r;
 
-    target[1].mask = PULLUP_USB_BIT | (color->green > 0 ? GREEN_BIT : 0);
-    target[1].time = 1023 - color->green;
+    target[1].mask = PULLUP_USB_BIT | (g > 0 ? GREEN_BIT : 0);
+    target[1].time = 1023 - g;
 
-    target[2].mask = PULLUP_USB_BIT | (color->blue > 0 ? BLUE_BIT : 0);
-    target[2].time = 1023 - color->blue;
+    target[2].mask = PULLUP_USB_BIT | (b > 0 ? BLUE_BIT : 0);
+    target[2].time = 1023 - b;
 
-    // Sort in sequence when it has to be switched on.
+    // Sort in sequence when it has to be switched on (unroll?)
     sort(target, 3);
 
     // Each segment has the bits set from the one before.
     target[1].mask |= target[0].mask;
     target[2].mask |= target[1].mask;
-
-    // When we start, lets set the debug mask to have a sync pulse.
-    //target[0].mask |= DEBUG_MASK;
 }
 
+// Gamma correct and scale input [0..255] -> [0..1023]
 static ushort gamma_correct(uchar c) {
     // Simplified gamma ~= 2.2
     if (c < 64) return c;
@@ -317,11 +330,7 @@ static ushort gamma_correct(uchar c) {
 }
 
 static void set_rgb(uchar r, uchar g, uchar b) {
-    struct hires_rgb_t color;
-    color.red = gamma_correct(r);
-    color.green = gamma_correct(g);
-    color.blue = gamma_correct(b);
-    set_color(&color, segments);
+    set_color(gamma_correct(r), gamma_correct(g), gamma_correct(b), segments);
 }
 
 void set_fixvalue_register(int32_t from, int32_t to, int32_t iterations,
@@ -338,16 +347,19 @@ static inline void increment_fixvalue(struct fixvalue_t *value) {
     value->value += value->diff;
 }
 
-void prepare_morph(const struct sequence_t *prev,
+void prepare_morph(const struct rgb_t *prev,
                    const struct sequence_t *target,
                    struct morph_t *morph) {
     morph->morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
     morph->hold_iterations = PWM_FREQUENCY_HZ / 4 * target->hold_time;
-    set_fixvalue_register(prev->red, target->red, morph->morph_iterations,
+    set_fixvalue_register(prev->red, target->col.red,
+                          morph->morph_iterations,
                           &morph->red);
-    set_fixvalue_register(prev->green, target->green, morph->morph_iterations,
+    set_fixvalue_register(prev->green, target->col.green,
+                          morph->morph_iterations,
                           &morph->green);
-    set_fixvalue_register(prev->blue, target->blue, morph->morph_iterations,
+    set_fixvalue_register(prev->blue, target->col.blue,
+                          morph->morph_iterations,
                           &morph->blue);
 }
 
@@ -374,59 +386,30 @@ static bool do_morph(struct morph_t *morph) {
     return true;
 }
 
-static void set_init_sequence() {
-    sequence[0].red = 255;
-    sequence[0].green = 0;
-    sequence[0].blue = 0;
-    sequence[0].morph_time = 1;
-    sequence[0].hold_time = 0;
-
-    sequence[1].red = 0;
-    sequence[1].green = 0;
-    sequence[1].blue = 0;
-    sequence[1].morph_time = 1;
-    sequence[1].hold_time = 0;
-
-    sequence[2].red = 0;
-    sequence[2].green = 255;
-    sequence[2].blue = 0;
-    sequence[2].morph_time = 30;
-    sequence[2].hold_time = 0;
-
-    sequence_elements = 2;
-}
-
 int main(void)
 {
 
     DDRA = LED_MASK | PULLUP_USB_BIT | DEBUG_MASK;
-
-    PORT_LED &= ~PULLUP_USB_BIT;
+    OUT_PORT = 0;
 
     usb_init();
 
-    // End of segments.
+    // Initialize segments. The last segment is always 1023
     segments[3].time = 1023;
     segments[3].mask = PULLUP_USB_BIT;
+    set_rgb(0, 0, 0);   // the other segments are initialized with this.
 
-    set_rgb(0, 0, 0);
-
-    static struct hires_rgb_t color;
     static struct morph_t morph;
-    morph.red.value = 0;
-    morph.green.value = 0;
-    morph.blue.value = 0;
-    morph.morph_iterations = 0;
-    morph.hold_iterations = 0;
+    prepare_morph(&sequence[0].col, &sequence[0], &morph);
+
     ft.bytes_left = 0;
     ushort pwm = 0;
     uchar s = 0;
     ushort trigger = segments[s].time;
 
-    PORT_LED = PULLUP_USB_BIT;
-
-    set_init_sequence();
     uchar current_sequence = 0;
+
+    OUT_PORT = PULLUP_USB_BIT;
 
     for (;;) {
         usb_poll();
@@ -435,15 +418,17 @@ int main(void)
             if (sequence_elements > 0) {
                 current_sequence = sequence_elements - 1;
             } else {
-                set_rgb(sequence[0].red, sequence[0].green, sequence[0].blue);
+                set_rgb(sequence[0].col.red,
+                        sequence[0].col.green,
+                        sequence[0].col.blue);
             }
         }
 
         if (pwm++ >= trigger) {
-            PORT_LED = segments[s].mask;
+            OUT_PORT = segments[s].mask;
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
-                PORT_LED |= DEBUG_MASK;
+                OUT_PORT |= DEBUG_MASK;
                 s = 0;
                 pwm = 0;
                 if ((new_data || !do_morph(&morph)) && sequence_elements > 0) {
@@ -451,7 +436,7 @@ int main(void)
                     uchar next_sequence
                         = (current_sequence + 1) % sequence_elements;
                     // TODO: instead of current_seq, take current color here.
-                    prepare_morph(&sequence[current_sequence],
+                    prepare_morph(&sequence[current_sequence].col,
                                   &sequence[next_sequence],
                                   &morph);
                     current_sequence = next_sequence;
