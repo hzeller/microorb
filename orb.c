@@ -81,7 +81,7 @@
 
 #include "usb.h"
 
-#define MAX_SEQUENCE_LEN 8
+#define MAX_SEQUENCE_LEN 10
 
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
@@ -142,7 +142,7 @@ struct morph_t {
 
 // We prefill our sequence elements with the Google colors
 // as the switch-on sequence
-static uchar sequence_elements = 8;
+static uchar sequence_elements = 10;
 static struct sequence_t sequence[ MAX_SEQUENCE_LEN ] = {
     { { 0x00, 0x00, 0x00 }, 0, 2 },   // initial black.
     { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
@@ -151,7 +151,9 @@ static struct sequence_t sequence[ MAX_SEQUENCE_LEN ] = {
     { { 0x00, 0x00, 0xff }, 1, 2 },   // g - blue
     { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
     { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
-    { { 0x00, 0x00, 0x00 }, 1, 255 }  // black for some time.
+    { { 0x00, 0x00, 0x00 }, 1, 255 }, // black for some time...
+    { { 0x00, 0x00, 0x00 }, 1, 255 },
+    { { 0x00, 0x00, 0x00 }, 1, 255 },
 };
 
 bool new_data = false;
@@ -228,29 +230,40 @@ extern byte_t usb_setup ( byte_t data[8] )
 struct fill_tracker {
     uchar sequence_elements;
     char* data;
-    uchar bytes_left;
+    uchar data_left;
+    uchar bytes_left;  // that can be different if the host sends too many.
 } ft;
 
 extern void usb_out( byte_t *data, byte_t len) {
     switch (input_mode) {
     case SET_COLOR: {
         if (ft.bytes_left == 0) {  // new start.
-            ft.sequence_elements = ((data[0] <= MAX_SEQUENCE_LEN)
-                                              ? data[0]
+            const uchar host_len = data[0];
+            ++data; --len;  // consumed first length byte.
+            ft.sequence_elements = ((host_len <= MAX_SEQUENCE_LEN)
+                                    ? host_len
                                     : MAX_SEQUENCE_LEN);
-            ++data; --len;  // consumed first byte.
+            // We override the sequence we currently have in memory. This is a
+            // benign race; worst that could happen is a wrong color briefly.
             ft.data = (char*) &sequence;
-            ft.bytes_left = ft.sequence_elements * sizeof(struct sequence_t);
+            ft.data_left = ft.sequence_elements * sizeof(struct sequence_t);
+            // Actual number of bytes might be bigger if the host sends more
+            // colors than we can handle. Be graceful and just ignore it.
+            ft.bytes_left = host_len * sizeof(struct sequence_t);
+        }
+        if (ft.data_left > 0) {
+            const uchar to_read = ft.data_left > len ? len : ft.data_left;
+            memcpy(ft.data, data, to_read);
+            ft.data_left -= to_read;
+            ft.data += to_read;
         }
         if (ft.bytes_left >= len) {
-            memcpy(ft.data, data, len);
             ft.bytes_left -= len;
-            ft.data += len;
         }
         if (ft.bytes_left == 0) {
-            new_data = true;
             sequence_elements = ft.sequence_elements;
             input_mode = NO_INPUT;
+            new_data = true;
         }
     }
         break;
@@ -416,6 +429,7 @@ int main(void)
     prepare_morph(&sequence[0].col, &sequence[0], &morph);
 
     ft.bytes_left = 0;
+    ft.data_left = 0;
     ushort pwm = 0;
     uchar s = 0;
     ushort trigger = segments[s].time;
