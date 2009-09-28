@@ -81,13 +81,14 @@
 
 #include "usb.h"
 
+#define MAX_SEQUENCE_LEN 8
+
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
 typedef unsigned char	bool;
 
 #define true  1
 #define false 0
-#define MAX_SEQUENCE_LEN 8
 
 // emperically determined PWM frequency: used to calculate what a morph-step is.
 #define PWM_FREQUENCY_HZ 200
@@ -156,14 +157,14 @@ static struct sequence_t sequence[ MAX_SEQUENCE_LEN ] = {
 bool new_data = false;
 
 #ifndef USBTINY_SERIAL
-#  error "Specify a serial number on the commandline: make USBTINY_SERIAL=ZRH0042"
+#  error "Specify serial number on the commandline: make USBTINY_SERIAL=ZRH0042"
 #endif
 
 #define OUT_PORT PORTA
 enum {
-    // 0x01, 0x02 used by usb.
+    // 0x01, 0x02 used by usb subsystem.
 
-    PULLUP_USB_BIT = 0x04,
+    PULLUP_USB_BIT = 0x04,   // Signal USB bus that we're ready.
 
     // 0x08 - N/C
 
@@ -172,19 +173,8 @@ enum {
     RED_BIT   = 0x40,
     LED_MASK  = RED_BIT | GREEN_BIT | BLUE_BIT,
 
-    DEBUG_MASK = 0x80
+    AUX_PORT = 0x80          // auxiliary output for user hacking.
 };
-
-#define DEBUG_MASK 0x80
-#define PULLUP_USB_BIT 0x04
-
-// wait up to 255 milliseconds.
-static void wait_millis(uchar millis) {
-    uchar i;
-    for(i=0; i < millis; i++){
-        _delay_ms(1.0);
-    }
-}
 
 struct time_mask {
     uchar  mask;        // LED mask
@@ -303,7 +293,30 @@ static void sort(struct time_mask *a, int count) {
 }
 
 // Set color with already gamma corrected short values [0..1023]
-void set_color(ushort r, ushort g, ushort b, struct time_mask *target) {
+void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
+    // Current limiting for 'blue' to produce better white. To have cheaper
+    // production, we use the same value for the current limiting resistors
+    // everywhere .. so we need to work around that in firmware ;)
+    b = 9 * b / 10;
+
+    // A single color takes around 350mA full on. However we're allowed to
+    // draw at most 500mA from the USB bus; so if we're beyond that, we need
+    // to scale down a bit to be within the limit.
+    // This will create some saturation effect when we approach that limit and
+    // watch some color change.
+    //
+    // Some measurements show that if more colors are on, the current per LED
+    // is more like 320mA, so lets take that as baseline.
+    const uint32_t current_limit = 1024L * 500 / 320;
+    const uint32_t current_sum = r + g + b;
+    if (current_sum > current_limit) {
+        // This fits into uint32 and makes
+        const uint32_t factor = 1024L * current_limit / current_sum;
+        r = r * factor / 1024L;
+        g = g * factor / 1024L;
+        b = b * factor / 1024L;
+    }
+
     target[0].mask = PULLUP_USB_BIT | (r > 0 ? RED_BIT : 0);
     target[0].time = 1023 - r;
 
@@ -389,7 +402,7 @@ static bool do_morph(struct morph_t *morph) {
 int main(void)
 {
 
-    DDRA = LED_MASK | PULLUP_USB_BIT | DEBUG_MASK;
+    DDRA = LED_MASK | PULLUP_USB_BIT | AUX_PORT;
     OUT_PORT = 0;
 
     usb_init();
@@ -428,7 +441,7 @@ int main(void)
             OUT_PORT = segments[s].mask;
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
-                OUT_PORT |= DEBUG_MASK;
+                OUT_PORT |= AUX_PORT;
                 s = 0;
                 pwm = 0;
                 if ((new_data || !do_morph(&morph)) && sequence_elements > 0) {
