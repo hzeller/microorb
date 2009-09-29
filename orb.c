@@ -227,41 +227,41 @@ extern byte_t usb_setup ( byte_t data[8] )
     return retval;
 }
 
-struct fill_tracker {
+static struct read_buffer_t {
     uchar sequence_elements;
     char* data;
-    uchar data_left;
-    uchar bytes_left;  // that can be different if the host sends too many.
-} ft;
+    ushort data_left;
+    ushort bytes_left;  // that can be different if the host sends too many.
+} rbuf;
 
 extern void usb_out( byte_t *data, byte_t len) {
     switch (input_mode) {
     case SET_COLOR: {
-        if (ft.bytes_left == 0) {  // new start.
+        if (rbuf.bytes_left == 0) {  // new start.
             const uchar host_len = data[0];
             ++data; --len;  // consumed first length byte.
-            ft.sequence_elements = ((host_len <= MAX_SEQUENCE_LEN)
+            rbuf.sequence_elements = ((host_len <= MAX_SEQUENCE_LEN)
                                     ? host_len
                                     : MAX_SEQUENCE_LEN);
             // We override the sequence we currently have in memory. This is a
             // benign race; worst that could happen is a wrong color briefly.
-            ft.data = (char*) &sequence;
-            ft.data_left = ft.sequence_elements * sizeof(struct sequence_t);
+            rbuf.data = (char*) &sequence;
+            rbuf.data_left = rbuf.sequence_elements * sizeof(struct sequence_t);
             // Actual number of bytes might be bigger if the host sends more
             // colors than we can handle. Be graceful and just ignore it.
-            ft.bytes_left = host_len * sizeof(struct sequence_t);
+            rbuf.bytes_left = host_len * sizeof(struct sequence_t);
         }
-        if (ft.data_left > 0) {
-            const uchar to_read = ft.data_left > len ? len : ft.data_left;
-            memcpy(ft.data, data, to_read);
-            ft.data_left -= to_read;
-            ft.data += to_read;
+        if (rbuf.data_left > 0) {
+            const uchar to_read = rbuf.data_left > len ? len : rbuf.data_left;
+            memcpy(rbuf.data, data, to_read);
+            rbuf.data_left -= to_read;
+            rbuf.data += to_read;
         }
-        if (ft.bytes_left >= len) {
-            ft.bytes_left -= len;
+        if (rbuf.bytes_left >= len) {
+            rbuf.bytes_left -= len;
         }
-        if (ft.bytes_left == 0) {
-            sequence_elements = ft.sequence_elements;
+        if (rbuf.bytes_left == 0) {
+            sequence_elements = rbuf.sequence_elements;
             input_mode = NO_INPUT;
             new_data = true;
         }
@@ -309,7 +309,7 @@ static void sort(struct time_mask *a, int count) {
 void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
     // Current limiting for 'blue' to produce better white. To have cheaper
     // production, we use the same value for the current limiting resistors
-    // everywhere .. so we need to work around that in firmware ;)
+    // everywhere .. so we need to adjust in firmware ;)
     b = 9 * b / 10;
 
     // A single color takes around 350mA full on. However we're allowed to
@@ -323,7 +323,6 @@ void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
     const uint32_t current_limit = 1024L * 500 / 320;
     const uint32_t current_sum = r + g + b;
     if (current_sum > current_limit) {
-        // This fits into uint32 and makes
         const uint32_t factor = 1024L * current_limit / current_sum;
         r = r * factor / 1024L;
         g = g * factor / 1024L;
@@ -428,8 +427,8 @@ int main(void)
     static struct morph_t morph;
     prepare_morph(&sequence[0].col, &sequence[0], &morph);
 
-    ft.bytes_left = 0;
-    ft.data_left = 0;
+    rbuf.bytes_left = 0;
+    rbuf.data_left = 0;
     ushort pwm = 0;
     uchar s = 0;
     ushort trigger = segments[s].time;
