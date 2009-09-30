@@ -81,7 +81,7 @@
 
 #include "usb.h"
 
-#define MAX_SEQUENCE_LEN 10
+#define MAX_SEQUENCE_LEN 8
 
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
@@ -99,6 +99,7 @@ enum Request {
     ORB_SETAUX,
     ORB_GETCOLOR,
     ORB_GETSEQUENCE,
+    ORB_SETSERIAL,
 };
 
 enum CapabilityFlags {
@@ -142,7 +143,7 @@ struct morph_t {
 
 // We prefill our sequence elements with the Google colors
 // as the switch-on sequence
-static uchar sequence_elements = 10;
+static uchar sequence_elements = 8;
 static struct sequence_t sequence[ MAX_SEQUENCE_LEN ] = {
     { { 0x00, 0x00, 0x00 }, 0, 2 },   // initial black.
     { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
@@ -152,8 +153,8 @@ static struct sequence_t sequence[ MAX_SEQUENCE_LEN ] = {
     { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
     { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
     { { 0x00, 0x00, 0x00 }, 1, 255 }, // black for some time...
-    { { 0x00, 0x00, 0x00 }, 1, 255 },
-    { { 0x00, 0x00, 0x00 }, 1, 255 },
+    //{ { 0x00, 0x00, 0x00 }, 1, 255 },
+    //{ { 0x00, 0x00, 0x00 }, 1, 255 },
 };
 
 bool new_data = false;
@@ -188,7 +189,13 @@ struct time_mask segments[4];
 volatile uchar active_timing = 0;
 
 // -- USB
-static enum InputMode { NO_INPUT, SET_COLOR, SET_AUX } input_mode = NO_INPUT;
+static enum InputMode {
+    NO_INPUT,
+    SET_COLOR,
+    SET_AUX,
+    SET_SERIAL
+} input_mode = NO_INPUT;
+
 extern byte_t usb_setup ( byte_t data[8] )
 {
     uchar retval = 0;
@@ -217,8 +224,13 @@ extern byte_t usb_setup ( byte_t data[8] )
         retval = 3;
         break;
 
+#if 0
     case ORB_SETAUX:
         input_mode = SET_AUX;
+        break;
+#endif
+    case ORB_SETSERIAL:
+        input_mode = SET_SERIAL;
         break;
 
     default:
@@ -268,6 +280,10 @@ extern void usb_out( byte_t *data, byte_t len) {
     }
         break;
 
+    case SET_SERIAL:
+        set_usb_serial(8, data);
+        break;
+
     default:
         ;
     }
@@ -310,7 +326,8 @@ void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
     // Current limiting for 'blue' to produce better white. To have cheaper
     // production, we use the same value for the current limiting resistors
     // everywhere .. so we need to adjust in firmware ;)
-    b = 9 * b / 10;
+    // +1 so that 1 does not become 0.
+    b = 9 * (b+1) / 10;
 
     // A single color takes around 350mA full on. However we're allowed to
     // draw at most 500mA from the USB bus; so if we're beyond that, we need
@@ -416,6 +433,8 @@ int main(void)
 
     DDRA = LED_MASK | PULLUP_USB_BIT | AUX_PORT;
     OUT_PORT = 0;
+
+    init_usb_serial_once();
 
     usb_init();
 

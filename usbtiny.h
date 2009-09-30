@@ -5,6 +5,8 @@
 // Public License as published by the Free Software Foundation.
 // ======================================================================
 
+#define USB_EEPROM_SERIAL
+
 // The D+ and D- USB signals should be connected to two pins of the same
 // I/O port. The following macros define the port letter and the input
 // bit numbers:
