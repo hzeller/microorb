@@ -178,9 +178,9 @@ static bool new_data = false;
 // Initial sequence - stored in eeprom. We set it to the Google colors; with
 // the POKE_EEPROM it could be set to anything by a knowledgable user ;)
 static struct sequence_t initial_sequence EEMEM = {
-    12,
+    16,
     {
-        { { 0x00, 0x00, 0x00 }, 0, 2 },   // initial black.
+        { { 0x00, 0x00, 0x00 }, 0, 2 },   // initially briefly black.
         { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
         { { 0xff, 0x00, 0x00 }, 1, 2 },   // o - red
         { { 0xff, 0xff, 0x00 }, 1, 2 },   // o - yellow
@@ -188,10 +188,14 @@ static struct sequence_t initial_sequence EEMEM = {
         { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
         { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
         { { 0x00, 0x00, 0x00 }, 1, 255 }, // black for some time...
-        { { 0x00, 0x00, 0x00 }, 1, 255 },
-        { { 0x00, 0x00, 0x00 }, 1, 255 },
-        { { 0x00, 0x00, 0x00 }, 1, 255 },
-        { { 0x00, 0x00, 0x00 }, 1, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
     }
 };
 
