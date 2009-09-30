@@ -99,7 +99,7 @@ typedef unsigned char	bool;
 #define PWM_FREQUENCY_HZ 200
 
 // Only if the current_limit_config contains the magic value, we actually
-// switch it off. This is for advantageous users that know that thier USB hub
+// switch it off. This is for advantageous users that know that their USB hub
 // is fine with sourcing more than 500mA.
 #define SWITCH_OFF_MAGIC 0x2a
 uchar eeprom_current_limit_config EEMEM = ~SWITCH_OFF_MAGIC;
@@ -120,6 +120,7 @@ enum CapabilityFlags {
     HAS_GET_SEQUENCE   = 0x02,
     HAS_AUX            = 0x04,
     HAS_GAMMA_CORRECT  = 0x08,
+    HAS_CURRENT_LIMIT  = 0x10
     /* more to come */
 };
 
@@ -249,7 +250,8 @@ extern byte_t usb_setup ( byte_t data[8] )
 
     case ORB_GETCAPABILITIES: {
         struct capabilities_t *cap = (struct capabilities_t*) data;
-        cap->flags = HAS_GET_COLOR | HAS_GAMMA_CORRECT;
+        cap->flags = HAS_GET_COLOR | HAS_GAMMA_CORRECT
+            | (do_current_limit ? HAS_CURRENT_LIMIT : 0);
         cap->max_sequence_len = MAX_SEQUENCE_LEN;
         cap->version = 1;
         cap->reserved2 = 0;
