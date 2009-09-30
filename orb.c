@@ -97,14 +97,14 @@ typedef unsigned char	bool;
 // Only if the current_limit_config contains the magic value, we actually
 // switch it off.
 #define SWITCH_OFF_MAGIC 0x2a
-uchar eeprom_current_limit_config EEMEM = 0xa5;
+uchar eeprom_current_limit_config EEMEM = ~SWITCH_OFF_MAGIC;
 
 bool do_current_limit = true;
 
 enum Request {
     ORB_SETSEQUENCE,
     ORB_GETCAPABILITIES,
-    ORB_SETAUX,
+    ORB_SETAUX,       // This orb does not provide SETAUX
     ORB_GETCOLOR,
     ORB_GETSEQUENCE,  // not implemented.
     ORB_POKE_EEPROM,
@@ -125,25 +125,31 @@ struct capabilities_t {
     uchar reserved2;
 };
 
+// A simple fixed-point arithmetic register for color morphing.
+// We have a high resolution increment for each iteration (which might be
+// less than 1 if we over a minute want to change from 0..255 but
+// have 200Hz * 60 iterations for that).
+struct fixedpoint_t {
+    uint32_t value;   // upper 10 bit: value (TODO: use union and 8bit)
+    int32_t diff;     // changes do be done.
+};
+
+// The morphing data structure that keeps the current color.
+struct morph_t {
+    struct fixedpoint_t red;
+    struct fixedpoint_t green;
+    struct fixedpoint_t blue;
+    ushort morph_iterations;
+    ushort hold_iterations;
+};
+static struct morph_t morph;
+
+// A color; non-gamma corrected values from 0..255
 struct rgb_t {
     uchar red;
     uchar green;
     uchar blue;
 };
-
-struct fixvalue_t {
-    uint32_t value;   // upper 8 bit: value.
-    int32_t diff;    // changes do be done.
-};
-
-struct morph_t {
-    struct fixvalue_t red;
-    struct fixvalue_t green;
-    struct fixvalue_t blue;
-    ushort morph_iterations;
-    ushort hold_iterations;
-};
-static struct morph_t morph;
 
 // A sequence element consists of the color, the time to morph to that color
 // and the time to hold the color.
@@ -153,6 +159,11 @@ struct color_period_t {
     uchar hold_time;   // time to hold this color in 250ms steps
 };
 
+// A sequence as set by the user. We only have one sequence in memory for
+// space reasons; it would be better to have two (one for writing from usb and
+// one for reading) and flip between these. But we don't have enough memory for
+// that. And the worst that could happen due to this 'race' is a brief color
+// glitch.
 struct sequence_t {
     uchar count;
     struct color_period_t period[ MAX_SEQUENCE_LEN ];
@@ -160,7 +171,12 @@ struct sequence_t {
 
 static struct sequence_t sequence;
 
-// Initial sequence - stored in eeprom. We set it to the Google colors.
+// New sequence data arrived. Set by the USB callback once all data has been
+// received.
+static bool new_data = false;
+
+// Initial sequence - stored in eeprom. We set it to the Google colors; with
+// the POKE_EEPROM it could be set to anything by a knowledgable user ;)
 static struct sequence_t initial_sequence EEMEM = {
     12,
     {
@@ -179,9 +195,10 @@ static struct sequence_t initial_sequence EEMEM = {
     }
 };
 
-bool new_data = false;
-
+// The IO port we're writing to for color setting.
 #define OUT_PORT PORTA
+
+// Settable bits.
 enum {
     // 0x01, 0x02 used by usb subsystem.
 
@@ -197,14 +214,12 @@ enum {
     AUX_PORT = 0x80          // auxiliary output for user hacking.
 };
 
+// PWM segment data. see set_color() for explanation.
 struct time_mask {
     uchar  mask;        // LED mask
     ushort time;        // point in time.
 };
-
-struct time_mask segments[4];
-
-volatile uchar active_timing = 0;
+static struct time_mask segments[4];
 
 // -- USB
 static enum InputMode {
@@ -218,9 +233,9 @@ extern byte_t usb_setup ( byte_t data[8] )
 {
     uchar retval = 0;
     switch (data[1]) {
-    case ORB_SETSEQUENCE: 
+    case ORB_SETSEQUENCE:
         input_mode = SET_SEQUENCE;
-        // receive data in usb_out();
+        // retval=0: receive data in usb_out();
         break;
 
     case ORB_GETCAPABILITIES: {
@@ -242,6 +257,7 @@ extern byte_t usb_setup ( byte_t data[8] )
 
     case ORB_POKE_EEPROM:
         input_mode = POKE_EEPROM;
+        // retval=0: receive data in usb_out();
         break;
 
     default:
@@ -250,6 +266,9 @@ extern byte_t usb_setup ( byte_t data[8] )
     return retval;
 }
 
+
+// Buffer to keep track of read data that comes in chunks of 8 bytes
+// in usb_out()
 static struct read_buffer_t {
     uchar count;
     char* data;
@@ -288,41 +307,28 @@ extern void usb_out( byte_t *data, byte_t len) {
             input_mode = NO_INPUT;
             new_data = true;
         }
-    }
         break;
+    }
 
     case POKE_EEPROM: {
         int pos = data[0];  // Position in eeprom.
         int i;
-        for (i = 1; i < len; ++i, ++pos)
+        for (i = 1; i < len; ++i, ++pos) {
             eeprom_write_byte((byte_t*)pos, data[i]);
-    }
+        }
         break;
+    }
 
     default:
         ;
     }
 }
 
-#if 0
-static void timer_init() {
-    // WGM1 = 15 (fast pwm, OCR1A TOP)
-    TCCR1A = (1 << WGM11) | (1 << WGM10);
-    TCCR1B = (1<<WGM13) | (1<<WGM12)
-        //| (1<<CS12);   // 256 prescale, page 109
-        | (1<<CS11) | (1<<CS10);   // 64 prescale, page 109
-        //| (1<<CS11);   // 8 prescale, page 109
-    // enable timer 1 Overflow
-    TIMSK1 = (1<<TOIE1);
-}
-#endif
-
 static void swap(struct time_mask *a, struct time_mask *b) {
-    //static struct time_mask tmp;  // not on stack. Makes accounting simpler.
-    //struct time_mask *tmp = &segments[3];
-    segments[3] = *b;
-    *b = *a;
-    *a = segments[3];
+  static struct time_mask tmp;  // not on stack. Makes accounting simpler.
+  tmp = *b;
+  *b = *a;
+  *a = tmp;
 }
 
 // for 3 elements, bubblesort is really the simplest and best.
@@ -337,7 +343,28 @@ static void sort(struct time_mask *a, int count) {
     }
 }
 
-// Set color with already gamma corrected short values [0..1023]
+// Set color with already gamma corrected short values [0..1023].
+//
+// Setting the brightness of the LED is done by setting the on/off duty
+// cycle of it (PWM).. which we loop through at around 200Hz so there is
+// no flicker.
+// Unfortunately, we cannot use hardware PWM because the Attiny only has two
+// hardware PWM output pins (to which two of the outputs are connected so it
+// is tinkerable if you want to play with only two colors ;) ).
+//
+// We have to influence the duty cycle of 3 independent LEDs. We do this by
+// dividing the whole PWM cycle in 4 segments whose length are precomputed by
+// this function.
+//
+// We start with all LEDs black. The first segment has a 'trigger time' at
+// which it switches the first LED on; in the second segment the second
+// brightest base-color is switched on (the first LED keeps running) and so
+// on until we have all required LEDs switched on with the trigger of the
+// third segment. We keep running until the last segment, that always has the
+// trigger time 1023, switches all LEDs off. New cycle begins.
+//
+// So setting the color basically means to prepare the segments and sort them
+// by duration the LEDs are on - longest first; or: smallest trigger time first.
 void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
     // Current limiting for 'blue' to produce better white. To have cheaper
     // production, we use the same value for the current limiting resistors
@@ -371,14 +398,12 @@ void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
     target[2].mask = PULLUP_USB_BIT | (b > 0 ? BLUE_BIT : 0);
     target[2].time = 1023 - b;
 
-    // Sort in sequence when it has to be switched on. So smallest values
-    // first.
-    sort(target, 3);
-
-    // This is always last. We need to set it here because target[3] was
-    // used as temporary swap buffer.
+    // This is always last. No need to have that in the subsequent sort.
     target[3].time = 1023;
     target[3].mask = PULLUP_USB_BIT;
+
+    // Sort in sequence when it has to be switched on.
+    sort(target, 3);
 
     // Each segment has the bits set from the one before.
     target[1].mask |= target[0].mask;
@@ -397,8 +422,8 @@ static void set_rgb(uchar r, uchar g, uchar b) {
     set_color(gamma_correct(r), gamma_correct(g), gamma_correct(b), segments);
 }
 
-void set_fixvalue_register(int32_t from, int32_t to, int32_t iterations,
-                           struct fixvalue_t *out) {
+void set_fixedpoint_register(int32_t from, int32_t to, int32_t iterations,
+                             struct fixedpoint_t *out) {
     if (iterations != 0) {
         out->value = from << 21;
         out->diff = (to - from) * 2048 * 1024 / iterations;
@@ -407,23 +432,24 @@ void set_fixvalue_register(int32_t from, int32_t to, int32_t iterations,
     }
 }
 
-static inline void increment_fixvalue(struct fixvalue_t *value) {
+static inline void increment_fixedpoint(struct fixedpoint_t *value) {
     value->value += value->diff;
 }
 
 void prepare_morph(const struct rgb_t *prev,
                    const struct color_period_t *target) {
+    // PWM_FREQUENCY_HZ / 4, because is in 250ms steps.
     morph.morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
-    morph.hold_iterations = PWM_FREQUENCY_HZ / 4 * target->hold_time;
-    set_fixvalue_register(prev->red, target->col.red,
-                          morph.morph_iterations,
-                          &morph.red);
-    set_fixvalue_register(prev->green, target->col.green,
-                          morph.morph_iterations,
-                          &morph.green);
-    set_fixvalue_register(prev->blue, target->col.blue,
-                          morph.morph_iterations,
-                          &morph.blue);
+    morph.hold_iterations  = PWM_FREQUENCY_HZ / 4 * target->hold_time;
+    set_fixedpoint_register(prev->red, target->col.red,
+                            morph.morph_iterations,
+                            &morph.red);
+    set_fixedpoint_register(prev->green, target->col.green,
+                            morph.morph_iterations,
+                            &morph.green);
+    set_fixedpoint_register(prev->blue, target->col.blue,
+                            morph.morph_iterations,
+                            &morph.blue);
 }
 
 // Morph and return 'false' if next morph cycle needs to be calculated.
@@ -433,9 +459,9 @@ static bool do_morph(void) {
             morph.blue.value >> 21);
     // first we count down all morph iterations ..
     if (morph.morph_iterations != 0) {
-        increment_fixvalue(&morph.red);
-        increment_fixvalue(&morph.green);
-        increment_fixvalue(&morph.blue);
+        increment_fixedpoint(&morph.red);
+        increment_fixedpoint(&morph.green);
+        increment_fixedpoint(&morph.blue);
         --morph.morph_iterations;
     }
     // .. then continue with the hold iterations.
@@ -455,7 +481,7 @@ int main(void)
     DDRA = LED_MASK | PULLUP_USB_BIT | AUX_PORT;
     OUT_PORT = 0;
 
-    // Get initial sequence from eeprom.
+    // Copy initial sequence from eeprom to memory.
     byte_t *src = (byte_t*) &initial_sequence;
     byte_t *dst = (byte_t*) &sequence;
     byte_t i;
@@ -469,8 +495,7 @@ int main(void)
 
     usb_init();
 
-    set_rgb(0, 0, 0);   // the other segments are initialized with this.
-
+    set_rgb(0, 0, 0);
     prepare_morph(&sequence.period[0].col, &sequence.period[0]);
 
     rbuf.bytes_left = 0;
@@ -481,6 +506,8 @@ int main(void)
 
     uchar current_sequence = 0;
 
+    // After the PULLUP, the usb negotiation begins. So do this after the
+    // expensive setup and right before our loop.
     OUT_PORT = PULLUP_USB_BIT;
 
     for (;;) {
