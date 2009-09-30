@@ -86,8 +86,6 @@
 
 #include "usb.h"
 
-#define MAX_SEQUENCE_LEN 16
-
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
 typedef unsigned char	bool;
@@ -95,17 +93,35 @@ typedef unsigned char	bool;
 #define true  1
 #define false 0
 
-// emperically determined PWM frequency: used to calculate what a morph-step is.
+// --- Hardware specific Configuration
+// Number of elements in the sequence we support.
+#define MAX_SEQUENCE_LEN 16
+
+// emperically determined PWM frequency: used to calculate how many iterations
+// we need for one morph step.
 #define PWM_FREQUENCY_HZ 200
 
-// Only if the current_limit_config contains the magic value, we actually
-// switch it off. This is for advantageous users that know that their USB hub
-// is fine with sourcing more than 500mA.
-#define SWITCH_OFF_MAGIC 0x2a
-uchar eeprom_current_limit_config EEMEM = ~SWITCH_OFF_MAGIC;
+// The IO port we're writing to for color setting.
+#define OUT_PORT PORTA
 
-bool do_current_limit = true;
+// Settable bits on the IO-port.
+enum {
+    // 0x01, 0x02 used by usb subsystem.
 
+    PULLUP_USB_BIT = 0x04,   // Signal USB bus that we're ready.
+
+    // 0x08 - N/C
+
+    BLUE_BIT  = 0x10,
+    GREEN_BIT = 0x20,
+    RED_BIT   = 0x40,
+    LED_MASK  = RED_BIT | GREEN_BIT | BLUE_BIT,
+
+    AUX_PORT = 0x80          // auxiliary output for user hacking.
+};
+
+// ---- The following enums and structs are known as well to the host
+//      program as they're used in the communication (might become an include?)
 enum Request {
     ORB_SETSEQUENCE,
     ORB_GETCAPABILITIES,
@@ -156,15 +172,86 @@ struct sequence_t {
     struct color_period_t period[ MAX_SEQUENCE_LEN ];
 };
 
-static struct sequence_t sequence;
+// ---- End host known data structures.
+
+static struct sequence_t sequence;  // there is one global sequence.
 
 // New sequence data arrived. Set by the USB callback once all data has been
 // received and stored in the global sequence.
-static bool new_data = false;
+static bool new_sequence_data = false;
 
-// Initial sequence - stored in eeprom. We set it to the Google colors; with
-// the POKE_EEPROM it could be set to anything by a knowledgable user ;)
-static struct sequence_t initial_sequence EEMEM = {
+// A simple fixed-point arithmetic register used for color morphing.
+// We have a high resolution increment for each iteration (which might be
+// much less than 1 if we over a minute want to change from 0..255 but
+// have 200Hz * 60s iterations for that). So we need a float representation that
+// is cheap to compute in a microcontroller.
+struct fixedpoint_t {
+  union {
+    uchar pre_dot;  // todo: Not tested yet; find out alignment in AVR here.
+    uint32_t full_resolution;
+  } value;
+    int32_t scaled_diff;     // Change per step. Scaled to full resolution.
+};
+
+// Prepare the fixedpiont value to go from value 'from' to 'to' in the given
+// number of 'iterations'.
+static void fixedpoint_set_difference(struct fixedpoint_t *out,
+                                      int32_t from, int32_t to,
+                                      int32_t iterations);
+
+// Step towards the prepared target value. After this has been called
+// the number of iterations given in set_difference(), the value has reached
+// the target value.
+static void fixedpoint_increment(struct fixedpoint_t *value);
+
+
+
+// The morphing data structure keeping track of the current morph state.
+struct colormorph_t {
+    struct fixedpoint_t red;
+    struct fixedpoint_t green;
+    struct fixedpoint_t blue;
+    ushort morph_iterations;
+    ushort hold_iterations;
+};
+static struct colormorph_t morph;   // Only one global morph state.
+
+// operations on the global morph instance (passing a pointer of it uses a bit
+// more program space)
+
+// Prepare the global morph data structure to morph from the current color to
+// the target color - given the morph- and hold-time request in target.
+static void colormorph_prepare(const struct rgb_t *current,
+                               const struct color_period_t *target);
+
+// Morph one step, return 'false' when we're done with morphing, i.e. all
+// morph and hold iterations are completed.
+static bool colormorph_step(void);
+
+// PWM segment data. see set_color() for explanation.
+struct pwm_segment_t {
+    uchar  mask;        // LED mask
+    ushort time;        // point in time.
+};
+static struct pwm_segment_t pwm_segments[4];
+
+// ---- EEPROM configuration ----
+// (there is the serial number configuration earlier in eeprom memory as
+//  linked from usb.c)
+
+// Only if the current_limit_config contains this magic value, we actually
+// switch it off. This is for advantageous users that know that their USB hub
+// is fine with sourcing more than 500mA. And that know what they're doing.
+#define SWITCH_CURRENT_LIMIT_OFF_MAGIC 0x2a
+
+// Current limiting configuration. Only if this value has the right magic
+// content, we switch off current limiting.
+uchar ee_current_limit EEMEM = ~SWITCH_CURRENT_LIMIT_OFF_MAGIC;
+
+// Initial sequence - stored in eeprom. We set it to the Google colors to
+// have some feedback when plugging in the USB.
+// With the POKE_EEPROM it can be set to anything by a knowledgable user ;)
+static struct sequence_t ee_initial_sequence EEMEM = {
     16,
     {
         { { 0x00, 0x00, 0x00 }, 0, 2 },   // initially briefly black.
@@ -185,65 +272,11 @@ static struct sequence_t initial_sequence EEMEM = {
         { { 0x00, 0x00, 0x00 }, 0, 255 },
     }
 };
+// ---- end EEPROM configuration ----
 
-// A simple fixed-point arithmetic register for color morphing.
-// We have a high resolution increment for each iteration (which might be
-// less than 1 if we over a minute want to change from 0..255 but
-// have 200Hz * 60 iterations for that).
-struct fixedpoint_t {
-  union {
-    uchar pre_dot;  // todo: Not tested yet; find out alignment in AVR here.
-    uint32_t full_resolution;
-  } value;
-    int32_t scaled_diff;     // changes do be done, scaled to full resolution.
-};
-// Operations on this data type.
-static void fixedpoint_set_difference(struct fixedpoint_t *out,
-                                      int32_t from, int32_t to,
-                                      int32_t iterations);
-static void fixedpoint_increment(struct fixedpoint_t *value);
-
-// The morphing data structure that keeps the current color.
-struct colormorph_t {
-    struct fixedpoint_t red;
-    struct fixedpoint_t green;
-    struct fixedpoint_t blue;
-    ushort morph_iterations;
-    ushort hold_iterations;
-};
-
-static struct colormorph_t morph;   // One global instance.
-// operations on the global morph instance (passing a pointer of it uses a bit
-// more program space)
-static void colormorph_prepare(const struct rgb_t *prev,
-                               const struct color_period_t *target);
-static bool colormorph_step(void);
-
-// The IO port we're writing to for color setting.
-#define OUT_PORT PORTA
-
-// Settable bits.
-enum {
-    // 0x01, 0x02 used by usb subsystem.
-
-    PULLUP_USB_BIT = 0x04,   // Signal USB bus that we're ready.
-
-    // 0x08 - N/C
-
-    BLUE_BIT  = 0x10,
-    GREEN_BIT = 0x20,
-    RED_BIT   = 0x40,
-    LED_MASK  = RED_BIT | GREEN_BIT | BLUE_BIT,
-
-    AUX_PORT = 0x80          // auxiliary output for user hacking.
-};
-
-// PWM segment data. see set_color() for explanation.
-struct pwm_segment_t {
-    uchar  mask;        // LED mask
-    ushort time;        // point in time.
-};
-static struct pwm_segment_t pwm_segments[4];
+// Global flag if we do current limiting. That might be switched off at
+// boot time if the ee_current_limit configuration value suggests so.
+static bool do_current_limit = true;
 
 // -- USB
 static enum InputMode {
@@ -330,7 +363,7 @@ extern void usb_out( byte_t *data, byte_t len) {
         if (rbuf.bytes_left == 0) {
             sequence.count = rbuf.count;
             input_mode = NO_INPUT;
-            new_data = true;
+            new_sequence_data = true;
         }
         break;
     }
@@ -481,16 +514,16 @@ static inline void fixedpoint_increment(struct fixedpoint_t *value) {
     value->value.full_resolution += value->scaled_diff;
 }
 
-static void colormorph_prepare(const struct rgb_t *prev,
+static void colormorph_prepare(const struct rgb_t *current,
                                const struct color_period_t *target) {
-    // PWM_FREQUENCY_HZ / 4, because is in 250ms steps.
+    // PWM_FREQUENCY_HZ / 4, because times are in 250ms steps.
     morph.morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
     morph.hold_iterations  = PWM_FREQUENCY_HZ / 4 * target->hold_time;
-    fixedpoint_set_difference(&morph.red, prev->red, target->col.red,
+    fixedpoint_set_difference(&morph.red, current->red, target->col.red,
                               morph.morph_iterations);
-    fixedpoint_set_difference(&morph.green, prev->green, target->col.green,
+    fixedpoint_set_difference(&morph.green, current->green, target->col.green,
                               morph.morph_iterations);
-    fixedpoint_set_difference(&morph.blue, prev->blue, target->col.blue,
+    fixedpoint_set_difference(&morph.blue, current->blue, target->col.blue,
                               morph.morph_iterations);
 }
 
@@ -524,7 +557,7 @@ int main(void)
     OUT_PORT = 0;
 
     // Copy initial sequence from eeprom to memory.
-    byte_t *src = (byte_t*) &initial_sequence;
+    byte_t *src = (byte_t*) &ee_initial_sequence;
     byte_t *dst = (byte_t*) &sequence;
     byte_t i;
     for (i = 0; i < sizeof(struct sequence_t); ++i, ++src, ++dst)
@@ -532,7 +565,7 @@ int main(void)
 
     // See if we have the magic value that switches off USB-bus saving current
     // limiting...
-    if (eeprom_read_byte(&eeprom_current_limit_config) == SWITCH_OFF_MAGIC)
+    if (eeprom_read_byte(&ee_current_limit) == SWITCH_CURRENT_LIMIT_OFF_MAGIC)
         do_current_limit = false;
 
     usb_init();
@@ -555,7 +588,7 @@ int main(void)
     for (;;) {
         usb_poll();
 
-        if (new_data) {
+        if (new_sequence_data) {
             if (sequence.count > 0) {
                 current_sequence = sequence.count - 1;
             } else {
@@ -572,8 +605,9 @@ int main(void)
                 OUT_PORT |= AUX_PORT;
                 s = 0;
                 pwm = 0;
-                if ((new_data || !colormorph_step()) && sequence.count > 0) {
-                    new_data = false;
+                if ((new_sequence_data || !colormorph_step())
+                    && sequence.count > 0) {
+                    new_sequence_data = false;
                     uchar next_sequence
                         = (current_sequence + 1) % sequence.count;
                     // TODO: instead of current_seq, take current color here.
