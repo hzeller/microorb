@@ -131,25 +131,6 @@ struct capabilities_t {
     uchar reserved2;
 };
 
-// A simple fixed-point arithmetic register for color morphing.
-// We have a high resolution increment for each iteration (which might be
-// less than 1 if we over a minute want to change from 0..255 but
-// have 200Hz * 60 iterations for that).
-struct fixedpoint_t {
-    uint32_t value;   // upper 10 bit: value (TODO: use union and 8bit)
-    int32_t diff;     // changes do be done.
-};
-
-// The morphing data structure that keeps the current color.
-struct morph_t {
-    struct fixedpoint_t red;
-    struct fixedpoint_t green;
-    struct fixedpoint_t blue;
-    ushort morph_iterations;
-    ushort hold_iterations;
-};
-static struct morph_t morph;
-
 // A color; non-gamma corrected values from 0..255
 struct rgb_t {
     uchar red;
@@ -178,7 +159,7 @@ struct sequence_t {
 static struct sequence_t sequence;
 
 // New sequence data arrived. Set by the USB callback once all data has been
-// received.
+// received and stored in the global sequence.
 static bool new_data = false;
 
 // Initial sequence - stored in eeprom. We set it to the Google colors; with
@@ -205,6 +186,39 @@ static struct sequence_t initial_sequence EEMEM = {
     }
 };
 
+// A simple fixed-point arithmetic register for color morphing.
+// We have a high resolution increment for each iteration (which might be
+// less than 1 if we over a minute want to change from 0..255 but
+// have 200Hz * 60 iterations for that).
+struct fixedpoint_t {
+  union {
+    uchar pre_dot;  // todo: Not tested yet; find out alignment in AVR here.
+    uint32_t full_resolution;
+  } value;
+    int32_t scaled_diff;     // changes do be done, scaled to full resolution.
+};
+// Operations on this data type.
+static void fixedpoint_set_difference(struct fixedpoint_t *out,
+                                      int32_t from, int32_t to,
+                                      int32_t iterations);
+static void fixedpoint_increment(struct fixedpoint_t *value);
+
+// The morphing data structure that keeps the current color.
+struct morph_t {
+    struct fixedpoint_t red;
+    struct fixedpoint_t green;
+    struct fixedpoint_t blue;
+    ushort morph_iterations;
+    ushort hold_iterations;
+};
+
+static struct morph_t morph;   // One global instance.
+// operations on the global morph instance (passing a pointer of it uses a bit
+// more program space)
+static void colormorph_prepare(const struct rgb_t *prev,
+                               const struct color_period_t *target);
+static bool colormorph_step(void);
+
 // The IO port we're writing to for color setting.
 #define OUT_PORT PORTA
 
@@ -225,11 +239,11 @@ enum {
 };
 
 // PWM segment data. see set_color() for explanation.
-struct time_mask {
+struct pwm_segment_t {
     uchar  mask;        // LED mask
     ushort time;        // point in time.
 };
-static struct time_mask segments[4];
+static struct pwm_segment_t pwm_segments[4];
 
 // -- USB
 static enum InputMode {
@@ -260,9 +274,9 @@ extern byte_t usb_setup ( byte_t data[8] )
     }
 
     case ORB_GETCOLOR:
-        data[0] = morph.red.value >> 21;
-        data[1] = morph.green.value >> 21;
-        data[2] = morph.blue.value >> 21;
+        data[0] = morph.red.value.pre_dot;
+        data[1] = morph.green.value.pre_dot;
+        data[2] = morph.blue.value.pre_dot;
         retval = 3;
         break;
 
@@ -335,15 +349,15 @@ extern void usb_out( byte_t *data, byte_t len) {
     }
 }
 
-static void swap(struct time_mask *a, struct time_mask *b) {
-  static struct time_mask tmp;  // not on stack. Makes accounting simpler.
+static void swap(struct pwm_segment_t *a, struct pwm_segment_t *b) {
+  static struct pwm_segment_t tmp;  // not on stack. Makes accounting simpler.
   tmp = *b;
   *b = *a;
   *a = tmp;
 }
 
 // for 3 elements, bubblesort is really the simplest and best.
-static void sort(struct time_mask *a, int count) {
+static void sort(struct pwm_segment_t *a, int count) {
     int i, j;
     for (i = 0; i < count; ++i) {
         for (j = i + 1; j < count; ++j) {
@@ -376,7 +390,8 @@ static void sort(struct time_mask *a, int count) {
 //
 // So setting the color basically means to prepare the segments and sort them
 // by duration the LEDs are on - longest first; or: smallest trigger time first.
-void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
+void set_color(uint32_t r, uint32_t g, uint32_t b,
+               struct pwm_segment_t *target) {
     // Current limiting for 'blue' to produce better white. To have cheaper
     // production, we use the same value for the current limiting resistors
     // everywhere .. so we need to adjust in firmware ;)
@@ -430,49 +445,65 @@ static ushort gamma_correct(uchar c) {
 }
 
 static void set_rgb(uchar r, uchar g, uchar b) {
-    set_color(gamma_correct(r), gamma_correct(g), gamma_correct(b), segments);
+    set_color(gamma_correct(r), gamma_correct(g), gamma_correct(b),
+              pwm_segments);
 }
 
-void set_fixedpoint_register(int32_t from, int32_t to, int32_t iterations,
-                             struct fixedpoint_t *out) {
+static void fixedpoint_set_difference(struct fixedpoint_t *out,
+                                      int32_t from, int32_t to,
+                                      int32_t iterations) {
     if (iterations != 0) {
-        out->value = from << 21;
-        out->diff = (to - from) * 2048 * 1024 / iterations;
+        out->value.full_resolution = 0;
+        out->value.pre_dot = from;
+
+        // The diff-field stores the signed difference * 2^24.
+        // While computing, we don't want the _signed_ range to overflow
+        // by a difference of 255 << 24.
+        // Since we always have more than a couple of iterations (smallest
+        // time 250ms translates to around 50 iterations), we will not overflow
+        // _after_ dividing by the iterations.
+        //
+        // So multiply the difference first by a high enough factor to maintain
+        // precision, but low enough not to overflow the temporary sint32 result.
+        // Then multiply to get the right range. We loose 2 bit precision, but
+        // that is fine for what we need.
+        // (60 seconds * 200Hz means we need to be able to represent 1/12000
+        // as fraction which we easily do).
+        out->scaled_diff = (to - from) * 1024 * 4096 / iterations * 4;
     } else {
-        out->value = to << 21;   // unsigned mul with 2048 * 1024
+        out->value.full_resolution = 0;
+        out->value.pre_dot = to;
+        // diff is never used in the iterations == 0 case; don't bother setting.
     }
 }
 
-static inline void increment_fixedpoint(struct fixedpoint_t *value) {
-    value->value += value->diff;
+static inline void fixedpoint_increment(struct fixedpoint_t *value) {
+    value->value.full_resolution += value->scaled_diff;
 }
 
-void prepare_morph(const struct rgb_t *prev,
-                   const struct color_period_t *target) {
+static void colormorph_prepare(const struct rgb_t *prev,
+                               const struct color_period_t *target) {
     // PWM_FREQUENCY_HZ / 4, because is in 250ms steps.
     morph.morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
     morph.hold_iterations  = PWM_FREQUENCY_HZ / 4 * target->hold_time;
-    set_fixedpoint_register(prev->red, target->col.red,
-                            morph.morph_iterations,
-                            &morph.red);
-    set_fixedpoint_register(prev->green, target->col.green,
-                            morph.morph_iterations,
-                            &morph.green);
-    set_fixedpoint_register(prev->blue, target->col.blue,
-                            morph.morph_iterations,
-                            &morph.blue);
+    fixedpoint_set_difference(&morph.red, prev->red, target->col.red,
+                              morph.morph_iterations);
+    fixedpoint_set_difference(&morph.green, prev->green, target->col.green,
+                              morph.morph_iterations);
+    fixedpoint_set_difference(&morph.blue, prev->blue, target->col.blue,
+                              morph.morph_iterations);
 }
 
 // Morph and return 'false' if next morph cycle needs to be calculated.
-static bool do_morph(void) {
-    set_rgb(morph.red.value >> 21,
-            morph.green.value >> 21,
-            morph.blue.value >> 21);
+static bool colormorph_step(void) {
+    set_rgb(morph.red.value.pre_dot,
+            morph.green.value.pre_dot,
+            morph.blue.value.pre_dot);
     // first we count down all morph iterations ..
     if (morph.morph_iterations != 0) {
-        increment_fixedpoint(&morph.red);
-        increment_fixedpoint(&morph.green);
-        increment_fixedpoint(&morph.blue);
+        fixedpoint_increment(&morph.red);
+        fixedpoint_increment(&morph.green);
+        fixedpoint_increment(&morph.blue);
         --morph.morph_iterations;
     }
     // .. then continue with the hold iterations.
@@ -507,13 +538,13 @@ int main(void)
     usb_init();
 
     set_rgb(0, 0, 0);
-    prepare_morph(&sequence.period[0].col, &sequence.period[0]);
+    colormorph_prepare(&sequence.period[0].col, &sequence.period[0]);
 
     rbuf.bytes_left = 0;
     rbuf.data_left = 0;
     ushort pwm = 0;
     uchar s = 0;
-    ushort trigger = segments[s].time;
+    ushort trigger = pwm_segments[s].time;
 
     uchar current_sequence = 0;
 
@@ -535,23 +566,23 @@ int main(void)
         }
 
         if (pwm++ >= trigger) {
-            OUT_PORT = segments[s].mask;
+            OUT_PORT = pwm_segments[s].mask;
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
                 OUT_PORT |= AUX_PORT;
                 s = 0;
                 pwm = 0;
-                if ((new_data || !do_morph()) && sequence.count > 0) {
+                if ((new_data || !colormorph_step()) && sequence.count > 0) {
                     new_data = false;
                     uchar next_sequence
                         = (current_sequence + 1) % sequence.count;
                     // TODO: instead of current_seq, take current color here.
-                    prepare_morph(&sequence.period[current_sequence].col,
-                                  &sequence.period[next_sequence]);
+                    colormorph_prepare(&sequence.period[current_sequence].col,
+                                       &sequence.period[next_sequence]);
                     current_sequence = next_sequence;
                 }
             }
-            trigger = segments[s].time;
+            trigger = pwm_segments[s].time;
         }
     }
     return 0;
