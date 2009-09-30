@@ -2,30 +2,31 @@
  * (c) 2008 Henner Zeller <h.zeller@acm.org>
  * This softare is GPL licensed.
  *
- * We have 2k flash and 128 bytes RAM (of which are already ~1700 bytes flash 
+ * We have 4k flash and 256 bytes RAM (of which are already ~1700 bytes flash
  * and ~50 bytes RAM used by the USB implementation), but want all these
  * Features
  *  + setting a single color
- *  + switching the AUX port
+ *  - switching the AUX port  (not anymore in this version of the Microorb)
  *
- * .. Not-yet-implemented features:
- *  - set multiple colors and cycle between them according to the 'hold' time.
+ * These features have been added since the 2k version of the initial orb:
+ *  + set multiple colors and cycle between them according to the 'hold' time.
  *    (as many colors as memory allows)
- *  - do a smooth morph between adjacend colors in the cycle according to the
+ *  + do a smooth morph between adjacend colors in the cycle according to the
  *    'morph' time.
+ *  + store the serial number in eeprom instead of the code.
+ *  + do gamma correction by having a mapping from 255 color values to
+ *    1024 PWM values; do 1024 PWM. Have the right relationships between
+ *    colors so that 'white' is white.
+ *  + limit the current to 500mA.
+ *
+ * These features have not been added.
  *  - after a setting has been active for more than 1min, store it in eeprom
  *    and restore it on startup. Only store _changed_ configuration because
  *    eeprom has a limited number of writes.
- *  - store the serial number in eeprom instead of the code.
- *  - do gamma correction by having a mapping from 255 color values to
- *    1024 PWM values; do 1024 PWM. Have the right relationships between
- *    colors so that 'white' is white.
- *  - Do the PWM in an interrupt handler.
- *  - limit the current to 500mA.
- *  - ...
- *
- * Even though not all features are implemented, the protocol already allows
- * for them so that its easy to migrate.
+ *    (questionable if useful. It is possible though to poke in the sequence
+ *    into eeprom, so can be an option for the commandline tool)
+ *  - Do the PWM in an interrupt handler. (won't work because of USB timing
+ *    restrictions).
  *
  * Protocol
  * The protocol between the orb and the host on the other end of the USB
@@ -35,6 +36,7 @@
  * The protocol for setting a sequence of colors is the number of sequence
  * elements followed by 5 byte structs containing the color and times.
  * ----------
+ * struct sequence_t {
  *  uchar sequence_elements;
  *  struct {
  *      uchar red;
@@ -42,7 +44,8 @@
  *      uchar blue;
  *      uchar morph_time;  // time to morph to the this color in 250ms steps
  *      uchar hold_time;   // time to hold this color in 250ms steps
- *  }  sequence[sequence_elements];
+ *  } sequence[sequence_elements];
+ * }
  *  -----------
  *  The whole sequence is repeated by the orb as soon as the data has been
  *  transmitted.
@@ -57,7 +60,8 @@
  *
  * --- ORB_SETAUX (host -> orb). Only implemented if HAS_AUX. ---
  * If capability HAS_AUX, then the single written byte corresponds to the
- * bits on the aux port.
+ * bits on the aux port (not in this version of the Orb. The first one had
+ * hardware for it, but was never used).
  *
  * --- ORB_GETCOLOR (orb -> host). Only implemented if HAS_GET_COLOR. ---
  * Get the currently displayed color. If this orb is morphing between two
@@ -95,7 +99,8 @@ typedef unsigned char	bool;
 #define PWM_FREQUENCY_HZ 200
 
 // Only if the current_limit_config contains the magic value, we actually
-// switch it off.
+// switch it off. This is for advantageous users that know that thier USB hub
+// is fine with sourcing more than 500mA.
 #define SWITCH_OFF_MAGIC 0x2a
 uchar eeprom_current_limit_config EEMEM = ~SWITCH_OFF_MAGIC;
 
