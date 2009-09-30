@@ -204,7 +204,7 @@ static void fixedpoint_set_difference(struct fixedpoint_t *out,
 static void fixedpoint_increment(struct fixedpoint_t *value);
 
 // The morphing data structure that keeps the current color.
-struct morph_t {
+struct colormorph_t {
     struct fixedpoint_t red;
     struct fixedpoint_t green;
     struct fixedpoint_t blue;
@@ -212,7 +212,7 @@ struct morph_t {
     ushort hold_iterations;
 };
 
-static struct morph_t morph;   // One global instance.
+static struct colormorph_t morph;   // One global instance.
 // operations on the global morph instance (passing a pointer of it uses a bit
 // more program space)
 static void colormorph_prepare(const struct rgb_t *prev,
