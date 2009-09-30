@@ -389,7 +389,7 @@ static void swap(struct pwm_segment_t *a, struct pwm_segment_t *b) {
   *a = tmp;
 }
 
-// for 3 elements, bubblesort is really the simplest and best.
+// for 3 elements, bubblesort is really the simplest and best ;)
 static void sort(struct pwm_segment_t *a, int count) {
     int i, j;
     for (i = 0; i < count; ++i) {
@@ -406,9 +406,9 @@ static void sort(struct pwm_segment_t *a, int count) {
 // Setting the brightness of the LED is done by setting the on/off duty
 // cycle of it (PWM).. which we loop through at around 200Hz so there is
 // no flicker.
-// Unfortunately, we cannot use hardware PWM because the Attiny only has two
-// hardware PWM output pins (to which two of the outputs are connected so it
-// is tinkerable if you want to play with only two colors ;) ).
+// Unfortunately, we cannot use fast hardware PWM because the Attiny only has
+// two hardware PWM output pins (to which two of the outputs are connected so
+// it is tinkerable if you want to play with only two colors ;) ).
 //
 // We have to influence the duty cycle of 3 independent LEDs. We do this by
 // dividing the whole PWM cycle in 4 segments whose length are precomputed by
@@ -431,14 +431,12 @@ void set_color(uint32_t r, uint32_t g, uint32_t b,
     // +1 so that 1 does not become 0.
     b = 9 * (b+1) / 10;
 
-    // A single color takes around 350mA full on. However we're allowed to
+    // A single color takes around 320mA full on. However we're allowed to
     // draw at most 500mA from the USB bus; so if we're beyond that, we need
     // to scale down a bit to be within the limit.
     // This will create some saturation effect when we approach that limit and
-    // watch some color change.
-    //
-    // Some measurements show that if more colors are on, the current per LED
-    // is more like 320mA, so lets take that as baseline.
+    // watch some color change but better than burning your USB port. And nicer
+    // that you can get more brightness if you're only using a single color.
     const uint32_t current_limit = 1024L * 500 / 320;
     const uint32_t current_sum = r + g + b;
     if (do_current_limit && current_sum > current_limit) {
