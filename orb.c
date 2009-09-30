@@ -97,8 +97,9 @@ typedef unsigned char	bool;
 // Number of elements in the sequence we support.
 #define MAX_SEQUENCE_LEN 16
 
-// emperically determined PWM frequency: used to calculate how many iterations
-// we need for one morph step.
+// Emperically determined PWM frequency: used to calculate how many iterations
+// we need for one morph step (depends on the number of CPU cycles spent in the
+// main-loop.
 #define PWM_FREQUENCY_HZ 200
 
 // The IO port we're writing to for color setting.
@@ -241,7 +242,7 @@ static struct pwm_segment_t pwm_segments[4];
 
 // Only if the current_limit_config contains this magic value, we actually
 // switch it off. This is for advantageous users that know that their USB hub
-// is fine with sourcing more than 500mA. And that know what they're doing.
+// is fine with sourcing more than 500mA. And know what they're doing.
 #define SWITCH_CURRENT_LIMIT_OFF_MAGIC 0x2a
 
 // Current limiting configuration. Only if this value has the right magic
