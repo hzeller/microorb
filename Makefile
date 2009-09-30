@@ -1,7 +1,7 @@
 # orb makefile <h.zeller@acm.org>
 ##
 
-USBTINY=../usbtiny/usbtiny
+USBTINY=usbtiny-1.4/usbtiny
 
 TARGET_ARCH = -mmcu=attiny44
 AVRDUDE     = avrdude -p t44 -c avrusb500
@@ -12,13 +12,21 @@ FLASH       = 4096
 SRAM        = 256
 OBJECTS     = orb.o
 
-CFLAGS=-O -mmcu=$(TARGET_ARCH) -Wall -Wstrict-prototypes -O3 -mcall-prologues -I. -I$(USBTINY)
 
+# We're lazy and use the rules that come with usbtiny.
 include $(USBTINY)/common.mk
 
 ifdef USBTINY_SERIAL
 CFLAGS+=-DUSBTINY_SERIAL=\"$(USBTINY_SERIAL)\"
 endif
+
+install: flash eeprom-flash
+
+eeprom.hex: main.elf
+	avr-objcopy -j .eeprom --change-section-lma .eeprom=0 -O ihex main.elf $@
+
+eeprom-flash: eeprom.hex
+	$(AVRDUDE) -U eeprom:w:eeprom.hex
 
 # (attiny 2313 page 163ff)
 ### Fuse high byte: 0xDB

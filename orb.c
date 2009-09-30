@@ -74,14 +74,15 @@
 
 #include <inttypes.h>
 
-#include <util/delay.h>
-#include <avr/io.h>
+#include <avr/eeprom.h>
 #include <avr/interrupt.h>
+#include <avr/io.h>
 #include <string.h>
+#include <util/delay.h>
 
 #include "usb.h"
 
-#define MAX_SEQUENCE_LEN 8
+#define MAX_SEQUENCE_LEN 16
 
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
@@ -93,22 +94,30 @@ typedef unsigned char	bool;
 // emperically determined PWM frequency: used to calculate what a morph-step is.
 #define PWM_FREQUENCY_HZ 200
 
+// Only if the current_limit_config contains the magic value, we actually
+// switch it off.
+#define SWITCH_OFF_MAGIC 0x2a
+uchar eeprom_current_limit_config EEMEM = 0xa5;
+
+bool do_current_limit = true;
+
 enum Request {
     ORB_SETSEQUENCE,
     ORB_GETCAPABILITIES,
     ORB_SETAUX,
     ORB_GETCOLOR,
-    ORB_GETSEQUENCE,
-    ORB_SETSERIAL,
+    ORB_GETSEQUENCE,  // not implemented.
+    ORB_POKE_EEPROM,
 };
 
 enum CapabilityFlags {
     HAS_GET_COLOR      = 0x01,
     HAS_GET_SEQUENCE   = 0x02,
     HAS_AUX            = 0x04,
-    HAS_GAMMA_CORRECT  = 0x08
+    HAS_GAMMA_CORRECT  = 0x08,
     /* more to come */
 };
+
 struct capabilities_t {
     uchar flags;
     uchar max_sequence_len;
@@ -120,12 +129,6 @@ struct rgb_t {
     uchar red;
     uchar green;
     uchar blue;
-};
-
-struct sequence_t {
-    struct rgb_t col;
-    uchar morph_time;  // time to morph to the this color in 250ms steps
-    uchar hold_time;   // time to hold this color in 250ms steps
 };
 
 struct fixvalue_t {
@@ -140,28 +143,43 @@ struct morph_t {
     ushort morph_iterations;
     ushort hold_iterations;
 };
+static struct morph_t morph;
 
-// We prefill our sequence elements with the Google colors
-// as the switch-on sequence
-static uchar sequence_elements = 8;
-static struct sequence_t sequence[ MAX_SEQUENCE_LEN ] = {
-    { { 0x00, 0x00, 0x00 }, 0, 2 },   // initial black.
-    { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
-    { { 0xff, 0x00, 0x00 }, 1, 2 },   // o - red
-    { { 0xff, 0xff, 0x00 }, 1, 2 },   // o - yellow
-    { { 0x00, 0x00, 0xff }, 1, 2 },   // g - blue
-    { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
-    { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
-    { { 0x00, 0x00, 0x00 }, 1, 255 }, // black for some time...
-    //{ { 0x00, 0x00, 0x00 }, 1, 255 },
-    //{ { 0x00, 0x00, 0x00 }, 1, 255 },
+// A sequence element consists of the color, the time to morph to that color
+// and the time to hold the color.
+struct color_period_t {
+    struct rgb_t col;
+    uchar morph_time;  // time to morph to the this color in 250ms steps
+    uchar hold_time;   // time to hold this color in 250ms steps
+};
+
+struct sequence_t {
+    uchar count;
+    struct color_period_t period[ MAX_SEQUENCE_LEN ];
+};
+
+static struct sequence_t sequence;
+
+// Initial sequence - stored in eeprom. We set it to the Google colors.
+static struct sequence_t initial_sequence EEMEM = {
+    12,
+    {
+        { { 0x00, 0x00, 0x00 }, 0, 2 },   // initial black.
+        { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
+        { { 0xff, 0x00, 0x00 }, 1, 2 },   // o - red
+        { { 0xff, 0xff, 0x00 }, 1, 2 },   // o - yellow
+        { { 0x00, 0x00, 0xff }, 1, 2 },   // g - blue
+        { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
+        { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
+        { { 0x00, 0x00, 0x00 }, 1, 255 }, // black for some time...
+        { { 0x00, 0x00, 0x00 }, 1, 255 },
+        { { 0x00, 0x00, 0x00 }, 1, 255 },
+        { { 0x00, 0x00, 0x00 }, 1, 255 },
+        { { 0x00, 0x00, 0x00 }, 1, 255 },
+    }
 };
 
 bool new_data = false;
-
-#ifndef USBTINY_SERIAL
-#  error "Specify serial number on the commandline: make USBTINY_SERIAL=ZRH0042"
-#endif
 
 #define OUT_PORT PORTA
 enum {
@@ -191,9 +209,9 @@ volatile uchar active_timing = 0;
 // -- USB
 static enum InputMode {
     NO_INPUT,
-    SET_COLOR,
+    SET_SEQUENCE,
     SET_AUX,
-    SET_SERIAL
+    POKE_EEPROM
 } input_mode = NO_INPUT;
 
 extern byte_t usb_setup ( byte_t data[8] )
@@ -201,7 +219,7 @@ extern byte_t usb_setup ( byte_t data[8] )
     uchar retval = 0;
     switch (data[1]) {
     case ORB_SETSEQUENCE: 
-        input_mode = SET_COLOR;
+        input_mode = SET_SEQUENCE;
         // receive data in usb_out();
         break;
 
@@ -216,21 +234,14 @@ extern byte_t usb_setup ( byte_t data[8] )
     }
 
     case ORB_GETCOLOR:
-#if 0
-        data[0] = next_rgb[read_buffer][0];
-        data[1] = next_rgb[read_buffer][1];
-        data[2] = next_rgb[read_buffer][2];
-#endif
+        data[0] = morph.red.value >> 21;
+        data[1] = morph.green.value >> 21;
+        data[2] = morph.blue.value >> 21;
         retval = 3;
         break;
 
-#if 0
-    case ORB_SETAUX:
-        input_mode = SET_AUX;
-        break;
-#endif
-    case ORB_SETSERIAL:
-        input_mode = SET_SERIAL;
+    case ORB_POKE_EEPROM:
+        input_mode = POKE_EEPROM;
         break;
 
     default:
@@ -240,7 +251,7 @@ extern byte_t usb_setup ( byte_t data[8] )
 }
 
 static struct read_buffer_t {
-    uchar sequence_elements;
+    uchar count;
     char* data;
     ushort data_left;
     ushort bytes_left;  // that can be different if the host sends too many.
@@ -248,20 +259,20 @@ static struct read_buffer_t {
 
 extern void usb_out( byte_t *data, byte_t len) {
     switch (input_mode) {
-    case SET_COLOR: {
+    case SET_SEQUENCE: {
         if (rbuf.bytes_left == 0) {  // new start.
             const uchar host_len = data[0];
             ++data; --len;  // consumed first length byte.
-            rbuf.sequence_elements = ((host_len <= MAX_SEQUENCE_LEN)
-                                    ? host_len
-                                    : MAX_SEQUENCE_LEN);
+            rbuf.count = ((host_len <= MAX_SEQUENCE_LEN)
+                          ? host_len
+                          : MAX_SEQUENCE_LEN);
             // We override the sequence we currently have in memory. This is a
             // benign race; worst that could happen is a wrong color briefly.
-            rbuf.data = (char*) &sequence;
-            rbuf.data_left = rbuf.sequence_elements * sizeof(struct sequence_t);
+            rbuf.data = (char*) &sequence.period;
+            rbuf.data_left = rbuf.count * sizeof(struct color_period_t);
             // Actual number of bytes might be bigger if the host sends more
             // colors than we can handle. Be graceful and just ignore it.
-            rbuf.bytes_left = host_len * sizeof(struct sequence_t);
+            rbuf.bytes_left = host_len * sizeof(struct color_period_t);
         }
         if (rbuf.data_left > 0) {
             const uchar to_read = rbuf.data_left > len ? len : rbuf.data_left;
@@ -273,15 +284,19 @@ extern void usb_out( byte_t *data, byte_t len) {
             rbuf.bytes_left -= len;
         }
         if (rbuf.bytes_left == 0) {
-            sequence_elements = rbuf.sequence_elements;
+            sequence.count = rbuf.count;
             input_mode = NO_INPUT;
             new_data = true;
         }
     }
         break;
 
-    case SET_SERIAL:
-        set_usb_serial(8, data);
+    case POKE_EEPROM: {
+        int pos = data[0];  // Position in eeprom.
+        int i;
+        for (i = 1; i < len; ++i, ++pos)
+            eeprom_write_byte((byte_t*)pos, data[i]);
+    }
         break;
 
     default:
@@ -303,10 +318,11 @@ static void timer_init() {
 #endif
 
 static void swap(struct time_mask *a, struct time_mask *b) {
-    static struct time_mask tmp;  // not on stack. Makes accounting simpler.
-    tmp = *b;
+    //static struct time_mask tmp;  // not on stack. Makes accounting simpler.
+    //struct time_mask *tmp = &segments[3];
+    segments[3] = *b;
     *b = *a;
-    *a = tmp;
+    *a = segments[3];
 }
 
 // for 3 elements, bubblesort is really the simplest and best.
@@ -339,7 +355,7 @@ void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
     // is more like 320mA, so lets take that as baseline.
     const uint32_t current_limit = 1024L * 500 / 320;
     const uint32_t current_sum = r + g + b;
-    if (current_sum > current_limit) {
+    if (do_current_limit && current_sum > current_limit) {
         const uint32_t factor = 1024L * current_limit / current_sum;
         r = r * factor / 1024L;
         g = g * factor / 1024L;
@@ -355,8 +371,14 @@ void set_color(uint32_t r, uint32_t g, uint32_t b, struct time_mask *target) {
     target[2].mask = PULLUP_USB_BIT | (b > 0 ? BLUE_BIT : 0);
     target[2].time = 1023 - b;
 
-    // Sort in sequence when it has to be switched on (unroll?)
+    // Sort in sequence when it has to be switched on. So smallest values
+    // first.
     sort(target, 3);
+
+    // This is always last. We need to set it here because target[3] was
+    // used as temporary swap buffer.
+    target[3].time = 1023;
+    target[3].mask = PULLUP_USB_BIT;
 
     // Each segment has the bits set from the one before.
     target[1].mask |= target[0].mask;
@@ -390,36 +412,35 @@ static inline void increment_fixvalue(struct fixvalue_t *value) {
 }
 
 void prepare_morph(const struct rgb_t *prev,
-                   const struct sequence_t *target,
-                   struct morph_t *morph) {
-    morph->morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
-    morph->hold_iterations = PWM_FREQUENCY_HZ / 4 * target->hold_time;
+                   const struct color_period_t *target) {
+    morph.morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
+    morph.hold_iterations = PWM_FREQUENCY_HZ / 4 * target->hold_time;
     set_fixvalue_register(prev->red, target->col.red,
-                          morph->morph_iterations,
-                          &morph->red);
+                          morph.morph_iterations,
+                          &morph.red);
     set_fixvalue_register(prev->green, target->col.green,
-                          morph->morph_iterations,
-                          &morph->green);
+                          morph.morph_iterations,
+                          &morph.green);
     set_fixvalue_register(prev->blue, target->col.blue,
-                          morph->morph_iterations,
-                          &morph->blue);
+                          morph.morph_iterations,
+                          &morph.blue);
 }
 
 // Morph and return 'false' if next morph cycle needs to be calculated.
-static bool do_morph(struct morph_t *morph) {
-    set_rgb(morph->red.value >> 21,
-            morph->green.value >> 21,
-            morph->blue.value >> 21);
+static bool do_morph(void) {
+    set_rgb(morph.red.value >> 21,
+            morph.green.value >> 21,
+            morph.blue.value >> 21);
     // first we count down all morph iterations ..
-    if (morph->morph_iterations != 0) {
-        increment_fixvalue(&morph->red);
-        increment_fixvalue(&morph->green);
-        increment_fixvalue(&morph->blue);
-        --morph->morph_iterations;
+    if (morph.morph_iterations != 0) {
+        increment_fixvalue(&morph.red);
+        increment_fixvalue(&morph.green);
+        increment_fixvalue(&morph.blue);
+        --morph.morph_iterations;
     }
     // .. then continue with the hold iterations.
-    else if (morph->hold_iterations != 0) {
-        --morph->hold_iterations;
+    else if (morph.hold_iterations != 0) {
+        --morph.hold_iterations;
     }
     // .. until we're done.
     else {
@@ -434,17 +455,23 @@ int main(void)
     DDRA = LED_MASK | PULLUP_USB_BIT | AUX_PORT;
     OUT_PORT = 0;
 
-    init_usb_serial_once();
+    // Get initial sequence from eeprom.
+    byte_t *src = (byte_t*) &initial_sequence;
+    byte_t *dst = (byte_t*) &sequence;
+    byte_t i;
+    for (i = 0; i < sizeof(struct sequence_t); ++i, ++src, ++dst)
+        *dst = eeprom_read_byte(src);
+
+    // See if we have the magic value that switches off USB-bus saving current
+    // limiting...
+    if (eeprom_read_byte(&eeprom_current_limit_config) == SWITCH_OFF_MAGIC)
+        do_current_limit = false;
 
     usb_init();
 
-    // Initialize segments. The last segment is always 1023
-    segments[3].time = 1023;
-    segments[3].mask = PULLUP_USB_BIT;
     set_rgb(0, 0, 0);   // the other segments are initialized with this.
 
-    static struct morph_t morph;
-    prepare_morph(&sequence[0].col, &sequence[0], &morph);
+    prepare_morph(&sequence.period[0].col, &sequence.period[0]);
 
     rbuf.bytes_left = 0;
     rbuf.data_left = 0;
@@ -460,12 +487,12 @@ int main(void)
         usb_poll();
 
         if (new_data) {
-            if (sequence_elements > 0) {
-                current_sequence = sequence_elements - 1;
+            if (sequence.count > 0) {
+                current_sequence = sequence.count - 1;
             } else {
-                set_rgb(sequence[0].col.red,
-                        sequence[0].col.green,
-                        sequence[0].col.blue);
+                set_rgb(sequence.period[0].col.red,
+                        sequence.period[0].col.green,
+                        sequence.period[0].col.blue);
             }
         }
 
@@ -476,14 +503,13 @@ int main(void)
                 OUT_PORT |= AUX_PORT;
                 s = 0;
                 pwm = 0;
-                if ((new_data || !do_morph(&morph)) && sequence_elements > 0) {
+                if ((new_data || !do_morph()) && sequence.count > 0) {
                     new_data = false;
                     uchar next_sequence
-                        = (current_sequence + 1) % sequence_elements;
+                        = (current_sequence + 1) % sequence.count;
                     // TODO: instead of current_seq, take current color here.
-                    prepare_morph(&sequence[current_sequence].col,
-                                  &sequence[next_sequence],
-                                  &morph);
+                    prepare_morph(&sequence.period[current_sequence].col,
+                                  &sequence.period[next_sequence]);
                     current_sequence = next_sequence;
                 }
             }
