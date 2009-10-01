@@ -86,7 +86,8 @@
 
 #include "usb.h"
 
-#define USE_TIMER 0
+// if 1, use the build-in counter as PWM refernce, otherwise some counter.
+#define USE_TIMER 1
 
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
@@ -97,7 +98,7 @@ typedef unsigned char	bool;
 
 // --- Hardware specific Configuration
 // Number of elements in the sequence we support.
-#define MAX_SEQUENCE_LEN 16
+#define MAX_SEQUENCE_LEN 15
 
 // Emperically determined PWM frequency: used to calculate how many iterations
 // we need for one morph step (depends on the number of CPU cycles spent in the
@@ -258,7 +259,7 @@ uchar ee_current_limit EEMEM = ~SWITCH_CURRENT_LIMIT_OFF_MAGIC;
 // have some feedback when plugging in the USB.
 // With the POKE_EEPROM it can be set to anything by a knowledgable user ;)
 static struct sequence_t ee_initial_sequence EEMEM = {
-    16,
+    12,
     {
         { { 0x00, 0x00, 0x00 }, 0, 2 },   // initially briefly black.
         { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
@@ -268,10 +269,6 @@ static struct sequence_t ee_initial_sequence EEMEM = {
         { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
         { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
         { { 0x00, 0x00, 0x00 }, 1, 255 }, // black for some time...
-        { { 0x00, 0x00, 0x00 }, 0, 255 },
-        { { 0x00, 0x00, 0x00 }, 0, 255 },
-        { { 0x00, 0x00, 0x00 }, 0, 255 },
-        { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
@@ -612,13 +609,22 @@ int main(void)
     for (;;) {
         usb_poll();
 
-#if 0
+        /*
+         * This whole stuff seems to take too long time. If we access the
+         * orb from the host in a loop, we sometimes get a protcol error. So
+         * Figure out where we need the most time.
+         * Having some usb_poll()s strayed in certainly helps ;)
+         */
         if (PWM_ACCESS >= next_pwm_action) {
             OUT_PORT = pwm_segments[s].mask;
             ++s;   // this could count backwards and compare against 0.
+            usb_poll();
             if (s > 3) {
+
+                /* If we got new sequence data in the meantime, we need to
+                 * handle that.
+                 */
                 bool need_morph_init = false;
-#if 1
                 if (new_sequence_data) {
                     if (sequence.count > 0) {
                         current_sequence = sequence.count - 1;
@@ -630,16 +636,15 @@ int main(void)
                     }
                     new_sequence_data = false;
                 }
-#endif
                 usb_poll();
                 s = 0;
                 PWM_RESET;
                 if ((need_morph_init || !colormorph_step())
                     && sequence.count > 0) {
+                    usb_poll();
                     uchar next_sequence
                         = (current_sequence + 1) % sequence.count;
                     // TODO: instead of current_seq, take current color here.
-                    usb_poll();
                     colormorph_prepare(&sequence.period[current_sequence].col,
                                        &sequence.period[next_sequence]);
                     current_sequence = next_sequence;
@@ -647,7 +652,6 @@ int main(void)
             }
             next_pwm_action = pwm_segments[s].time;
         }
-#endif
     }
     return 0;
 }

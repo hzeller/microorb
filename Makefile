@@ -6,8 +6,7 @@ USBTINY=usbtiny-1.4/usbtiny
 TARGET_ARCH = -mmcu=attiny44
 AVRDUDE     = avrdude -p t44 -c avrusb500
 FLASH_CMD   = $(AVRDUDE) -e -U flash:w:main.hex
-#STACK       = 42
-STACK       = 70
+STACK       = 80    # TODO: find tool to estimate max stack size.
 FLASH       = 4096
 SRAM        = 256
 OBJECTS     = orb.o
