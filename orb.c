@@ -461,10 +461,6 @@ void set_color(uint32_t r, uint32_t g, uint32_t b,
     target[2].mask = PULLUP_USB_BIT | (b > 0 ? BLUE_BIT : 0);
     target[2].time = 1023 - b;
 
-    // This is always last. No need to have that in the subsequent sort.
-    target[3].time = 1023;
-    target[3].mask = PULLUP_USB_BIT;
-
     // Sort in sequence when it has to be switched on.
     sort(target, 3);
 
@@ -583,7 +579,12 @@ int main(void)
     timer_init();
 #endif
 
-    set_rgb(0, 0, 0);
+    // This is always last in the pwm_segments and is never modified. Only set
+    // once.
+    pwm_segments[3].time = 1023;
+    pwm_segments[3].mask = PULLUP_USB_BIT;
+    set_rgb(0, 0, 0);         // initialize the rest of the fields.
+
     colormorph_prepare(&sequence.period[0].col, &sequence.period[0]);
 
     rbuf.bytes_left = 0;
