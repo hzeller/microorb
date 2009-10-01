@@ -86,7 +86,7 @@
 
 #include "usb.h"
 
-#define USE_TIMER 0
+#define USE_TIMER 1
 
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
@@ -190,7 +190,10 @@ static bool new_sequence_data = false;
 // is cheap to compute in a microcontroller.
 struct fixedpoint_t {
   union {
-    uchar pre_dot;  // todo: Not tested yet; find out alignment in AVR here.
+      struct {
+          uchar padding_[3];
+          uchar pre_dot;
+      } v;
     uint32_t full_resolution;
   } value;
     int32_t scaled_diff;     // Change per step. Scaled to full resolution.
@@ -310,9 +313,9 @@ extern byte_t usb_setup ( byte_t data[8] )
     }
 
     case ORB_GETCOLOR:
-        data[0] = morph.red.value.pre_dot;
-        data[1] = morph.green.value.pre_dot;
-        data[2] = morph.blue.value.pre_dot;
+        data[0] = morph.red.value.v.pre_dot;
+        data[1] = morph.green.value.v.pre_dot;
+        data[2] = morph.blue.value.v.pre_dot;
         retval = 3;
         break;
 
@@ -488,7 +491,7 @@ static void fixedpoint_set_difference(struct fixedpoint_t *out,
                                       int32_t iterations) {
     if (iterations != 0) {
         out->value.full_resolution = 0;
-        out->value.pre_dot = from;
+        out->value.v.pre_dot = from;
 
         // The diff-field stores the signed difference * 2^24.
         // While computing, we don't want the _signed_ range to overflow
@@ -506,7 +509,7 @@ static void fixedpoint_set_difference(struct fixedpoint_t *out,
         out->scaled_diff = (to - from) * 1024 * 4096 / iterations * 4;
     } else {
         out->value.full_resolution = 0;
-        out->value.pre_dot = to;
+        out->value.v.pre_dot = to;
         // diff is never used in the iterations == 0 case; don't bother setting.
     }
 }
@@ -530,9 +533,9 @@ static void colormorph_prepare(const struct rgb_t *current,
 
 // Morph and return 'false' if next morph cycle needs to be calculated.
 static bool colormorph_step(void) {
-    set_rgb(morph.red.value.pre_dot,
-            morph.green.value.pre_dot,
-            morph.blue.value.pre_dot);
+    set_rgb(morph.red.value.v.pre_dot,
+            morph.green.value.v.pre_dot,
+            morph.blue.value.v.pre_dot);
     // first we count down all morph iterations ..
     if (morph.morph_iterations != 0) {
         fixedpoint_increment(&morph.red);
