@@ -86,6 +86,8 @@
 
 #include "usb.h"
 
+#define USE_TIMER 0
+
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
 typedef unsigned char	bool;
@@ -549,6 +551,12 @@ static bool colormorph_step(void) {
     return true;
 }
 
+#if USE_TIMER
+static void timer_init() {
+    TCCR1B = (1<<CS11) | (1<<CS10);   // 64 prescale, page 109; around 183Hz
+}
+#endif
+
 int main(void)
 {
 
@@ -568,17 +576,30 @@ int main(void)
         do_current_limit = false;
 
     usb_init();
+#if USE_TIMER
+    timer_init();
+#endif
 
     set_rgb(0, 0, 0);
     colormorph_prepare(&sequence.period[0].col, &sequence.period[0]);
 
     rbuf.bytes_left = 0;
     rbuf.data_left = 0;
-    ushort pwm = 0;
     uchar s = 0;
     ushort trigger = pwm_segments[s].time;
 
     uchar current_sequence = 0;
+
+#if USE_TIMER
+#   define PWM_RESET  TCNT1 = 0
+#   define PWM_ACCESS TCNT1
+#else
+    ushort pwm;
+#   define PWM_RESET  pwm = 0
+#   define PWM_ACCESS pwm++
+#endif
+
+    PWM_RESET;
 
     // After the PULLUP, the usb negotiation begins. So do this after the
     // expensive setup and right before our loop.
@@ -597,13 +618,13 @@ int main(void)
             }
         }
 
-        if (pwm++ >= trigger) {
+        if (PWM_ACCESS >= trigger) {
             OUT_PORT = pwm_segments[s].mask;
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
                 OUT_PORT |= AUX_PORT;
                 s = 0;
-                pwm = 0;
+                PWM_RESET;
                 if ((new_sequence_data || !colormorph_step())
                     && sequence.count > 0) {
                     new_sequence_data = false;
