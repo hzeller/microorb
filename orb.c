@@ -86,7 +86,7 @@
 
 #include "usb.h"
 
-#define USE_TIMER 1
+#define USE_TIMER 0
 
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
@@ -102,7 +102,7 @@ typedef unsigned char	bool;
 // Emperically determined PWM frequency: used to calculate how many iterations
 // we need for one morph step (depends on the number of CPU cycles spent in the
 // main-loop.
-#define PWM_FREQUENCY_HZ 200
+#define PWM_FREQUENCY_HZ 183
 
 // The IO port we're writing to for color setting.
 #define OUT_PORT PORTA
@@ -376,7 +376,7 @@ extern void usb_out( byte_t *data, byte_t len) {
 
     case POKE_EEPROM: {
         int pos = data[0];  // Position in eeprom.
-        int i;
+        byte_t i;
         for (i = 1; i < len; ++i, ++pos) {
             eeprom_write_byte((byte_t*)pos, data[i]);
         }
@@ -389,15 +389,15 @@ extern void usb_out( byte_t *data, byte_t len) {
 }
 
 static void swap(struct pwm_segment_t *a, struct pwm_segment_t *b) {
-  static struct pwm_segment_t tmp;  // not on stack. Makes accounting simpler.
+  struct pwm_segment_t tmp;
   tmp = *b;
   *b = *a;
   *a = tmp;
 }
 
 // for 3 elements, bubblesort is really the simplest and best ;)
-static void sort(struct pwm_segment_t *a, int count) {
-    int i, j;
+static void sort(struct pwm_segment_t *a, byte_t count) {
+    byte_t i, j;
     for (i = 0; i < count; ++i) {
         for (j = i + 1; j < count; ++j) {
             if (a[i].time > a[j].time) {
@@ -582,7 +582,7 @@ int main(void)
     // This is always last in the pwm_segments and is never modified. Only set
     // once.
     pwm_segments[3].time = 1023;
-    pwm_segments[3].mask = PULLUP_USB_BIT;
+    pwm_segments[3].mask = PULLUP_USB_BIT | AUX_PORT;
     set_rgb(0, 0, 0);         // initialize the rest of the fields.
 
     colormorph_prepare(&sequence.period[0].col, &sequence.period[0]);
@@ -590,7 +590,7 @@ int main(void)
     rbuf.bytes_left = 0;
     rbuf.data_left = 0;
     uchar s = 0;
-    ushort trigger = pwm_segments[s].time;
+    ushort next_pwm_action = pwm_segments[s].time;
 
     uchar current_sequence = 0;
 
@@ -612,36 +612,42 @@ int main(void)
     for (;;) {
         usb_poll();
 
-        if (new_sequence_data) {
-            if (sequence.count > 0) {
-                current_sequence = sequence.count - 1;
-            } else {
-                set_rgb(sequence.period[0].col.red,
-                        sequence.period[0].col.green,
-                        sequence.period[0].col.blue);
-            }
-        }
-
-        if (PWM_ACCESS >= trigger) {
+#if 0
+        if (PWM_ACCESS >= next_pwm_action) {
             OUT_PORT = pwm_segments[s].mask;
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
-                OUT_PORT |= AUX_PORT;
+                bool need_morph_init = false;
+#if 1
+                if (new_sequence_data) {
+                    if (sequence.count > 0) {
+                        current_sequence = sequence.count - 1;
+                        need_morph_init = true;
+                    } else {
+                        set_rgb(sequence.period[0].col.red,
+                                sequence.period[0].col.green,
+                                sequence.period[0].col.blue);
+                    }
+                    new_sequence_data = false;
+                }
+#endif
+                usb_poll();
                 s = 0;
                 PWM_RESET;
-                if ((new_sequence_data || !colormorph_step())
+                if ((need_morph_init || !colormorph_step())
                     && sequence.count > 0) {
-                    new_sequence_data = false;
                     uchar next_sequence
                         = (current_sequence + 1) % sequence.count;
                     // TODO: instead of current_seq, take current color here.
+                    usb_poll();
                     colormorph_prepare(&sequence.period[current_sequence].col,
                                        &sequence.period[next_sequence]);
                     current_sequence = next_sequence;
                 }
             }
-            trigger = pwm_segments[s].time;
+            next_pwm_action = pwm_segments[s].time;
         }
+#endif
     }
     return 0;
 }
