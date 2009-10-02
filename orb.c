@@ -334,7 +334,7 @@ static struct read_buffer_t {
     uchar count;
     char* data;
     ushort data_left;
-    ushort bytes_left;  // that can be different if the host sends too many.
+    short bytes_left;  // that can be different if the host sends too many.
 } rbuf;
 
 extern void usb_out( byte_t *data, byte_t len) {
@@ -360,10 +360,8 @@ extern void usb_out( byte_t *data, byte_t len) {
             rbuf.data_left -= to_read;
             rbuf.data += to_read;
         }
-        if (rbuf.bytes_left >= len) {
-            rbuf.bytes_left -= len;
-        }
-        if (rbuf.bytes_left == 0) {
+        rbuf.bytes_left -= len;
+        if (rbuf.bytes_left <= 0) {
             sequence.count = rbuf.count;
             input_mode = NO_INPUT;
             new_sequence_data = true;
@@ -426,13 +424,14 @@ static void sort(struct pwm_segment_t *a, byte_t count) {
 //
 // So setting the color basically means to prepare the segments and sort them
 // by duration the LEDs are on - longest first; or: smallest trigger time first.
-void set_color(uint32_t r, uint32_t g, uint32_t b,
+void set_color(ushort r, ushort g, ushort b,
                struct pwm_segment_t *target) {
     // Current limiting for 'blue' to produce better white. To have cheaper
     // production, we use the same value for the current limiting resistors
     // everywhere .. so we need to adjust in firmware ;)
     // +1 so that 1 does not become 0.
     b = 9 * (b+1) / 10;
+    usb_poll();
 
     // A single color takes around 320mA full on. However we're allowed to
     // draw at most 500mA from the USB bus; so if we're beyond that, we need
@@ -443,19 +442,22 @@ void set_color(uint32_t r, uint32_t g, uint32_t b,
     const uint32_t current_limit = 1024L * 500 / 320;
     const uint32_t current_sum = r + g + b;
     if (do_current_limit && current_sum > current_limit) {
-        const uint32_t factor = 1024L * current_limit / current_sum;
-        r = r * factor / 1024L;
-        g = g * factor / 1024L;
-        b = b * factor / 1024L;
+        const ushort factor = 64L * current_limit / current_sum;
+        r = r * factor / 64;
+        usb_poll();
+        g = g * factor / 64;
+        usb_poll();
+        b = b * factor / 64;
+        usb_poll();
     }
 
-    target[0].mask = PULLUP_USB_BIT | (r > 0 ? RED_BIT : 0);
+    target[0].mask = (r > 0 ? RED_BIT : 0);
     target[0].time = 1023 - r;
 
-    target[1].mask = PULLUP_USB_BIT | (g > 0 ? GREEN_BIT : 0);
+    target[1].mask = (g > 0 ? GREEN_BIT : 0);
     target[1].time = 1023 - g;
 
-    target[2].mask = PULLUP_USB_BIT | (b > 0 ? BLUE_BIT : 0);
+    target[2].mask = (b > 0 ? BLUE_BIT : 0);
     target[2].time = 1023 - b;
 
     // Sort in sequence when it has to be switched on.
@@ -475,8 +477,10 @@ static ushort gamma_correct(uchar c) {
 }
 
 static void set_rgb(uchar r, uchar g, uchar b) {
+    usb_poll();
     set_color(gamma_correct(r), gamma_correct(g), gamma_correct(b),
               pwm_segments);
+    usb_poll();
 }
 
 static void fixedpoint_set_difference(struct fixedpoint_t *out,
@@ -592,15 +596,15 @@ int main(void)
     uchar current_sequence = 0;
 
 #if USE_TIMER
-#   define PWM_RESET  TCNT1 = 0
+#   define PWM_COUNTER_RESET  TCNT1 = 0
 #   define PWM_ACCESS TCNT1
 #else
     ushort pwm;
-#   define PWM_RESET  pwm = 0
+#   define PWM_COUNTER_RESET  pwm = 0
 #   define PWM_ACCESS pwm++
 #endif
 
-    PWM_RESET;
+    PWM_COUNTER_RESET;
 
     // After the PULLUP, the usb negotiation begins. So do this after the
     // expensive setup and right before our loop.
@@ -616,9 +620,8 @@ int main(void)
          * Having some usb_poll()s strayed in certainly helps ;)
          */
         if (PWM_ACCESS >= next_pwm_action) {
-            OUT_PORT = pwm_segments[s].mask;
+            OUT_PORT ^= (pwm_segments[s].mask ^ OUT_PORT) & LED_MASK;
             ++s;   // this could count backwards and compare against 0.
-            usb_poll();
             if (s > 3) {
 
                 /* If we got new sequence data in the meantime, we need to
@@ -626,7 +629,7 @@ int main(void)
                  */
                 bool need_morph_init = false;
                 if (new_sequence_data) {
-                    if (sequence.count > 0) {
+                    if (sequence.count > 1) {
                         current_sequence = sequence.count - 1;
                         need_morph_init = true;
                     } else {
@@ -636,12 +639,8 @@ int main(void)
                     }
                     new_sequence_data = false;
                 }
-                usb_poll();
-                s = 0;
-                PWM_RESET;
-                if ((need_morph_init || !colormorph_step())
-                    && sequence.count > 0) {
-                    usb_poll();
+                if (sequence.count > 1 &&
+                    (need_morph_init || !colormorph_step())) {
                     uchar next_sequence
                         = (current_sequence + 1) % sequence.count;
                     // TODO: instead of current_seq, take current color here.
@@ -649,6 +648,9 @@ int main(void)
                                        &sequence.period[next_sequence]);
                     current_sequence = next_sequence;
                 }
+
+                s = 0;
+                PWM_COUNTER_RESET;
             }
             next_pwm_action = pwm_segments[s].time;
         }
