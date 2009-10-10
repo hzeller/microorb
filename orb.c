@@ -87,7 +87,7 @@
 #include "usb.h"
 
 // if 1, use the build-in counter as PWM refernce, otherwise some counter.
-#define USE_TIMER 1
+#define USE_TIMER 0
 
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
@@ -451,13 +451,13 @@ void set_color(ushort r, ushort g, ushort b,
         usb_poll();
     }
 
-    target[0].mask = (r > 0 ? RED_BIT : 0);
+    target[0].mask = (r != 0 ? RED_BIT : 0);
     target[0].time = 1023 - r;
 
-    target[1].mask = (g > 0 ? GREEN_BIT : 0);
+    target[1].mask = (g != 0 ? GREEN_BIT : 0);
     target[1].time = 1023 - g;
 
-    target[2].mask = (b > 0 ? BLUE_BIT : 0);
+    target[2].mask = (b != 0 ? BLUE_BIT : 0);
     target[2].time = 1023 - b;
 
     // Sort in sequence when it has to be switched on.
@@ -511,7 +511,7 @@ static void fixedpoint_set_difference(struct fixedpoint_t *out,
     }
 }
 
-static inline void fixedpoint_increment(struct fixedpoint_t *value) {
+static void fixedpoint_increment(struct fixedpoint_t *value) {
     value->value.full_resolution += value->scaled_diff;
 }
 
@@ -620,7 +620,7 @@ int main(void)
          * Having some usb_poll()s strayed in certainly helps ;)
          */
         if (PWM_ACCESS >= next_pwm_action) {
-            OUT_PORT ^= (pwm_segments[s].mask ^ OUT_PORT) & LED_MASK;
+            OUT_PORT ^= (pwm_segments[s].mask ^ OUT_PORT) & (LED_MASK|AUX_PORT);
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
 
