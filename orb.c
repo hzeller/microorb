@@ -255,7 +255,6 @@ struct pwm_segment_t {
 };
 static struct pwm_segment_t pwm_segments[4];
 
-// Setting the aux port
 static void set_aux(bool value);
 static void current_limit_init();
 
@@ -290,7 +289,8 @@ static struct sequence_t ee_initial_sequence EEMEM = {
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
-        { { 0x00, 0x00, 0x00 }, 0, 255 },
+
+        { { 0x00, 0x00, 0x00 }, 0, 255 },  // Not used. Just sane defaults.
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
@@ -673,6 +673,8 @@ int main(void)
 #   define PWM_ACCESS pwm++
 #endif
 
+    struct rgb_t last_color;
+
     PWM_COUNTER_RESET;
 
     // After the PULLUP, the usb negotiation begins. So do this after the
@@ -705,6 +707,10 @@ int main(void)
                 if (new_sequence_data) {
                     if (sequence.count > 1) {
                         current_sequence = sequence.count - 1;
+                        // Next sequence starts from current color
+                        last_color.red = morph.red.value.v.pre_dot;
+                        last_color.green = morph.green.value.v.pre_dot;
+                        last_color.blue = morph.blue.value.v.pre_dot;
                         need_morph_init = true;
                     } else {
                         // The get-color reads from the morph structure. So
@@ -719,12 +725,10 @@ int main(void)
                 }
                 if (sequence.count > 1 &&
                     (need_morph_init || !colormorph_step())) {
-                    uchar next_sequence
-                        = (current_sequence + 1) % sequence.count;
-                    // TODO: instead of current_seq, take current color here.
-                    colormorph_prepare(&sequence.period[current_sequence].col,
-                                       &sequence.period[next_sequence]);
-                    current_sequence = next_sequence;
+                    current_sequence = (current_sequence + 1) % sequence.count;
+                    colormorph_prepare(&last_color,
+                                       &sequence.period[current_sequence]);
+                    last_color = sequence.period[current_sequence].col;
                 }
 
                 s = 0;
