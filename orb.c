@@ -89,6 +89,10 @@
 // if 1, use the build-in counter as PWM refernce, otherwise some counter.
 #define USE_TIMER 0
 
+// Enabling debugging will send a pulse on the AUX bit, but will make the
+// aux port not very usable ;)
+#define DEBUGGING_ENABLED 0
+
 typedef unsigned char	uchar;
 typedef unsigned short	ushort;
 typedef unsigned char	bool;
@@ -121,8 +125,15 @@ enum {
     RED_BIT   = 0x40,
     LED_MASK  = RED_BIT | GREEN_BIT | BLUE_BIT,
 
-    AUX_PORT = 0x80          // auxiliary output for user hacking.
+    AUX_BIT   = 0x80          // auxiliary output for user hacking.
 };
+
+#if DEBUGGING_ENABLED
+/* aux port is as well our debugging port */
+#  define DEBUG_BIT AUX_BIT
+#else
+#  define DEBUG_BIT 0
+#endif
 
 // ---- The following enums and structs are known as well to the host
 //      program as they're used in the communication (might become an include?)
@@ -242,6 +253,9 @@ struct pwm_segment_t {
 };
 static struct pwm_segment_t pwm_segments[4];
 
+// Setting the aux port
+static void set_aux(bool value);
+
 // ---- EEPROM configuration ----
 // (there is the serial number configuration earlier in eeprom memory as
 //  linked from usb.c)
@@ -316,6 +330,10 @@ extern byte_t usb_setup ( byte_t data[8] )
         retval = 3;
         break;
 
+    case ORB_SETAUX:
+        input_mode = SET_AUX;
+        break;
+
     case ORB_POKE_EEPROM:
         input_mode = POKE_EEPROM;
         // retval=0: receive data in usb_out();
@@ -377,6 +395,10 @@ extern void usb_out( byte_t *data, byte_t len) {
         }
         break;
     }
+
+    case SET_AUX:
+        set_aux(data[0] & 0x01);
+        break;
 
     default:
         ;
@@ -557,10 +579,17 @@ static void timer_init() {
 }
 #endif
 
+static void set_aux(bool value) {
+    if (value)
+        OUT_PORT |= AUX_BIT;
+    else
+        OUT_PORT &= ~AUX_BIT;
+}
+
 int main(void)
 {
 
-    DDRA = LED_MASK | PULLUP_USB_BIT | AUX_PORT;
+    DDRA = LED_MASK | PULLUP_USB_BIT | AUX_BIT;
     OUT_PORT = 0;
 
     // Copy initial sequence from eeprom to memory.
@@ -583,7 +612,7 @@ int main(void)
     // This is always last in the pwm_segments and is never modified. Only set
     // once.
     pwm_segments[3].time = 1023;
-    pwm_segments[3].mask = PULLUP_USB_BIT | AUX_PORT;
+    pwm_segments[3].mask = PULLUP_USB_BIT | DEBUG_BIT;
     set_rgb(0, 0, 0);         // initialize the rest of the fields.
 
     colormorph_prepare(&sequence.period[0].col, &sequence.period[0]);
@@ -620,7 +649,7 @@ int main(void)
          * Having some usb_poll()s strayed in certainly helps ;)
          */
         if (PWM_ACCESS >= next_pwm_action) {
-            OUT_PORT ^= (pwm_segments[s].mask ^ OUT_PORT) & (LED_MASK|AUX_PORT);
+            OUT_PORT ^= (pwm_segments[s].mask ^ OUT_PORT) & (LED_MASK|DEBUG_BIT);
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
 
