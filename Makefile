@@ -52,6 +52,7 @@ eeprom-flash: eeprom.hex
 fuse_2313:
 	$(AVRDUDE) -U hfuse:w:0xdb:m -U lfuse:w:0xef:m
 
+# (attiny 44 page 159)
 ### Fuse high byte: 0xDD
 # 7 rstdisbl    1    disable external reset: disabled (i.e.: reset enabled).
 # 6 dwen	1    debug wire: yes.
@@ -63,15 +64,15 @@ fuse_2313:
 # 1 bodlevel1	0 +  brown out detection 2.7 Volt (page 38)
 # 0 bodlevel0	1/
 #
-### Fuse low byte: 0xCE
+### Fuse low byte: 0xEE
 # 7 ckdiv8	1   divide by 8: no
 # 6 ckout	1   clk out: disabled.
-# 5 sut1	0-+ ceramic oscillator, slow rising power (page 28)
+# 5 sut1	1-+ ceramic resonator, BOD enabled (page 28)
 # 4 sut0	0/
 #
 # 3 cksel3	1\
-# 2 cksel2	1 + crystal >=8 Mhz  (page 26)
+# 2 cksel2	1 + crystal/oscillator >=8 Mhz  (page 26)
 # 1 cksel1	1/
-# 0 cksel0	0 ceramic osc SUT 10 -> crystal oscillator, fast rising power.
+# 0 cksel0	0 ceramic resonator SUT 10 -> crystal oscillator, BOD enabled.
 fuse_44:
-	$(AVRDUDE) -U hfuse:w:0xdd:m -U lfuse:w:0xce:m
+	$(AVRDUDE) -U hfuse:w:0xdd:m -U lfuse:w:0xee:m
