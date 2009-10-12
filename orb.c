@@ -86,6 +86,8 @@
 
 #include "usb.h"
 
+#define COMPILE_ASSERT(x) uchar compile_assert_[(x) ? 0 : -1]
+
 // if 1, use the build-in counter as PWM refernce, otherwise some counter.
 #define USE_TIMER 0
 
@@ -102,7 +104,7 @@ typedef unsigned char	bool;
 
 // --- Hardware specific Configuration
 // Number of elements in the sequence we support.
-#define MAX_SEQUENCE_LEN 15
+#define MAX_SEQUENCE_LEN 16
 
 // Emperically determined PWM frequency: used to calculate how many iterations
 // we need for one morph step (depends on the number of CPU cycles spent in the
@@ -142,7 +144,7 @@ enum Request {
     ORB_GETCAPABILITIES,
     ORB_SETAUX,       // This orb does not provide SETAUX
     ORB_GETCOLOR,
-    ORB_GETSEQUENCE,  // not implemented.
+    ORB_GETSEQUENCE,
     ORB_POKE_EEPROM,
 };
 
@@ -299,6 +301,7 @@ static bool do_current_limit = true;
 static enum InputMode {
     NO_INPUT,
     SET_SEQUENCE,
+    GET_SEQUENCE,
     SET_AUX,
     POKE_EEPROM
 } input_mode = NO_INPUT;
@@ -312,10 +315,16 @@ extern byte_t usb_setup ( byte_t data[8] )
         // retval=0: receive data in usb_out();
         break;
 
+    case ORB_GETSEQUENCE:
+        input_mode = GET_SEQUENCE;
+        retval = 0xff;
+        break;
+
     case ORB_GETCAPABILITIES: {
         struct capabilities_t *cap = (struct capabilities_t*) data;
-        cap->flags = HAS_GET_COLOR | HAS_GAMMA_CORRECT
-            | (do_current_limit ? HAS_CURRENT_LIMIT : 0);
+        cap->flags = (HAS_GET_COLOR | HAS_GAMMA_CORRECT
+                      | HAS_AUX | HAS_GET_SEQUENCE
+                      | (do_current_limit ? HAS_CURRENT_LIMIT : 0));
         cap->max_sequence_len = MAX_SEQUENCE_LEN;
         cap->version = 1;
         cap->reserved2 = 0;
@@ -346,41 +355,39 @@ extern byte_t usb_setup ( byte_t data[8] )
 }
 
 
-// Buffer to keep track of read data that comes in chunks of 8 bytes
-// in usb_out()
-static struct read_buffer_t {
-    uchar count;
+// Buffer to keep track of data that is transmitted in chunks of 8 bytes
+// in usb_out()/usb_in()
+static struct transmit_buffer_t {
     char* data;
-    ushort data_left;
-    short bytes_left;  // that can be different if the host sends too many.
-} rbuf;
+    uchar data_left;
+} txbuf;
+uchar tx_sequence_count;
+
+// Data_left must be able to hold the size of a sequence.
+COMPILE_ASSERT(sizeof(struct sequence_t) <= 255);
 
 extern void usb_out( byte_t *data, byte_t len) {
     switch (input_mode) {
     case SET_SEQUENCE: {
-        if (rbuf.bytes_left == 0) {  // new start.
+        if (txbuf.data_left == 0) {  // new start.
             const uchar host_len = data[0];
             ++data; --len;  // consumed first length byte.
-            rbuf.count = ((host_len <= MAX_SEQUENCE_LEN)
-                          ? host_len
-                          : MAX_SEQUENCE_LEN);
+            tx_sequence_count = ((host_len <= MAX_SEQUENCE_LEN)
+                                 ? host_len
+                                 : MAX_SEQUENCE_LEN);
             // We override the sequence we currently have in memory. This is a
             // benign race; worst that could happen is a wrong color briefly.
-            rbuf.data = (char*) &sequence.period;
-            rbuf.data_left = rbuf.count * sizeof(struct color_period_t);
-            // Actual number of bytes might be bigger if the host sends more
-            // colors than we can handle. Be graceful and just ignore it.
-            rbuf.bytes_left = host_len * sizeof(struct color_period_t);
+            txbuf.data = (char*) &sequence.period;
+            txbuf.data_left = tx_sequence_count * sizeof(struct color_period_t);
         }
-        if (rbuf.data_left > 0) {
-            const uchar to_read = rbuf.data_left > len ? len : rbuf.data_left;
-            memcpy(rbuf.data, data, to_read);
-            rbuf.data_left -= to_read;
-            rbuf.data += to_read;
+        if (txbuf.data_left > 0) {
+            const uchar to_read = txbuf.data_left > len ? len : txbuf.data_left;
+            memcpy(txbuf.data, data, to_read);
+            txbuf.data_left -= to_read;
+            txbuf.data += to_read;
         }
-        rbuf.bytes_left -= len;
-        if (rbuf.bytes_left <= 0) {
-            sequence.count = rbuf.count;
+        if (txbuf.data_left == 0) {
+            sequence.count = tx_sequence_count;
             input_mode = NO_INPUT;
             new_sequence_data = true;
         }
@@ -403,6 +410,31 @@ extern void usb_out( byte_t *data, byte_t len) {
     default:
         ;
     }
+}
+
+extern byte_t usb_in( byte_t *data, byte_t len ) {
+    byte_t retval = 0;
+    switch (input_mode) {
+    case GET_SEQUENCE: {
+        if (txbuf.data_left == 0) {  // new start.
+            txbuf.data = (char*) &sequence;
+            txbuf.data_left = sequence.count * sizeof(struct color_period_t) + 1;
+        }
+        if (txbuf.data_left > 0) {
+            const uchar to_read = txbuf.data_left > len ? len : txbuf.data_left;
+            memcpy(data, txbuf.data, to_read);
+            txbuf.data_left -= to_read;
+            if (txbuf.data_left <= 0)
+                input_mode = NO_INPUT;
+            txbuf.data += to_read;
+            retval = to_read;
+        }
+        break;
+    }
+    default:
+        ;
+    }
+    return retval;
 }
 
 static void swap(struct pwm_segment_t *a, struct pwm_segment_t *b) {
@@ -617,8 +649,7 @@ int main(void)
 
     colormorph_prepare(&sequence.period[0].col, &sequence.period[0]);
 
-    rbuf.bytes_left = 0;
-    rbuf.data_left = 0;
+    txbuf.data_left = 0;
     uchar s = 0;
     ushort next_pwm_action = pwm_segments[s].time;
 
