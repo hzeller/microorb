@@ -106,9 +106,8 @@ typedef unsigned char	bool;
 // Number of elements in the sequence we support.
 #define MAX_SEQUENCE_LEN 16
 
-// Emperically determined PWM frequency: used to calculate how many iterations
-// we need for one morph step (depends on the number of CPU cycles spent in the
-// main-loop.
+// PWM frequency: used to calculate how many iterations we need for one morph
+// step (depends on the number of CPU cycles spent in the main-loop.
 #define PWM_FREQUENCY_HZ 183
 
 // The IO port we're writing to for color setting.
@@ -191,7 +190,7 @@ struct sequence_t {
 
 // ---- End host known data structures.
 
-static struct sequence_t sequence;  // there is one global sequence.
+static struct sequence_t sequence;  // There is one global sequence.
 
 // New sequence data arrived. Set by the USB callback once all data has been
 // received and stored in the global sequence.
