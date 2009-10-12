@@ -275,7 +275,7 @@ uchar ee_current_limit EEMEM = ~SWITCH_CURRENT_LIMIT_OFF_MAGIC;
 // have some feedback when plugging in the USB.
 // With the POKE_EEPROM it can be set to anything by a knowledgable user ;)
 static struct sequence_t ee_initial_sequence EEMEM = {
-    12,
+    16,
     {
         { { 0x00, 0x00, 0x00 }, 0, 2 },   // initially briefly black.
         { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
@@ -285,6 +285,10 @@ static struct sequence_t ee_initial_sequence EEMEM = {
         { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
         { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
         { { 0x00, 0x00, 0x00 }, 1, 255 }, // black for some time...
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
+        { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
@@ -484,7 +488,7 @@ void set_color(ushort r, ushort g, ushort b,
     // production, we use the same value for the current limiting resistors
     // everywhere .. so we need to adjust in firmware ;)
     // +1 so that 1 does not become 0.
-    b = 9 * (b+1) / 10;
+    b = 14 * (b+1) / 16;
     usb_poll();
 
     // A single color takes around 320mA full on. However we're allowed to
@@ -680,7 +684,7 @@ int main(void)
          * Having some usb_poll()s strayed in certainly helps ;)
          */
         if (PWM_ACCESS >= next_pwm_action) {
-            OUT_PORT ^= (pwm_segments[s].mask ^ OUT_PORT) & (LED_MASK|DEBUG_BIT);
+            OUT_PORT = pwm_segments[s].mask | (OUT_PORT & ~(LED_MASK|DEBUG_BIT));
             ++s;   // this could count backwards and compare against 0.
             if (s > 3) {
 
