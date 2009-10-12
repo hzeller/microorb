@@ -89,7 +89,7 @@
 #define COMPILE_ASSERT(x) uchar compile_assert_[(x) ? 0 : -1]
 
 // if 1, use the build-in counter as PWM refernce, otherwise some counter.
-#define USE_TIMER 0
+#define USE_TIMER 1
 
 // Enabling debugging will send a pulse on the AUX bit, but will make the
 // aux port not very usable ;)
@@ -257,6 +257,7 @@ static struct pwm_segment_t pwm_segments[4];
 
 // Setting the aux port
 static void set_aux(bool value);
+static void current_limit_init();
 
 // ---- EEPROM configuration ----
 // (there is the serial number configuration earlier in eeprom memory as
@@ -265,7 +266,7 @@ static void set_aux(bool value);
 // Only if the current_limit_config contains this magic value, we actually
 // switch it off. This is for advantageous users that know that their USB hub
 // is fine with sourcing more than 500mA. And know what they're doing.
-#define SWITCH_CURRENT_LIMIT_OFF_MAGIC 0x2a
+#define SWITCH_CURRENT_LIMIT_OFF_MAGIC 0x5a
 
 // Current limiting configuration. Only if this value has the right magic
 // content, we switch off current limiting.
@@ -275,7 +276,7 @@ uchar ee_current_limit EEMEM = ~SWITCH_CURRENT_LIMIT_OFF_MAGIC;
 // have some feedback when plugging in the USB.
 // With the POKE_EEPROM it can be set to anything by a knowledgable user ;)
 static struct sequence_t ee_initial_sequence EEMEM = {
-    16,
+    12,
     {
         { { 0x00, 0x00, 0x00 }, 0, 2 },   // initially briefly black.
         { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
@@ -404,6 +405,7 @@ extern void usb_out( byte_t *data, byte_t len) {
         for (i = 1; i < len; ++i, ++pos) {
             eeprom_write_byte((byte_t*)pos, data[i]);
         }
+        current_limit_init();  // current limit changed ?
         break;
     }
 
@@ -622,6 +624,13 @@ static void set_aux(bool value) {
         OUT_PORT &= ~AUX_BIT;
 }
 
+static void current_limit_init() {
+    // See if we have the magic value that switches off USB-bus saving current
+    // limiting...
+    do_current_limit = 
+        (eeprom_read_byte(&ee_current_limit) != SWITCH_CURRENT_LIMIT_OFF_MAGIC);
+}
+
 int main(void)
 {
 
@@ -635,11 +644,7 @@ int main(void)
     for (i = 0; i < sizeof(struct sequence_t); ++i, ++src, ++dst)
         *dst = eeprom_read_byte(src);
 
-    // See if we have the magic value that switches off USB-bus saving current
-    // limiting...
-    if (eeprom_read_byte(&ee_current_limit) == SWITCH_CURRENT_LIMIT_OFF_MAGIC)
-        do_current_limit = false;
-
+    current_limit_init();
     usb_init();
 #if USE_TIMER
     timer_init();
@@ -648,7 +653,7 @@ int main(void)
     // This is always last in the pwm_segments and is never modified. Only set
     // once.
     pwm_segments[3].time = 1023;
-    pwm_segments[3].mask = PULLUP_USB_BIT | DEBUG_BIT;
+    pwm_segments[3].mask = DEBUG_BIT;
     set_rgb(0, 0, 0);         // initialize the rest of the fields.
 
     colormorph_prepare(&sequence.period[0].col, &sequence.period[0]);
@@ -690,6 +695,11 @@ int main(void)
 
                 /* If we got new sequence data in the meantime, we need to
                  * handle that.
+                 *
+                 * If we get a 'sequence' with only one element (which is the
+                 * usual case), we just set the color and disable the whole
+                 * colormorping branch. That improves the timing so that we
+                 * won't have USB timing problems here.
                  */
                 bool need_morph_init = false;
                 if (new_sequence_data) {
@@ -697,6 +707,10 @@ int main(void)
                         current_sequence = sequence.count - 1;
                         need_morph_init = true;
                     } else {
+                        // The get-color reads from the morph structure. So
+                        // initialize it here.
+                        colormorph_prepare(&sequence.period[0].col,
+                                           &sequence.period[0]);
                         set_rgb(sequence.period[0].col.red,
                                 sequence.period[0].col.green,
                                 sequence.period[0].col.blue);
