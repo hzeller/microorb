@@ -1,0 +1,29 @@
+- peek eeprom ?
+
+
+- ramp seems to be too steep inbetween (gamma correct)
+- check protocol error every now and then.
+- dithering ? Better low value color.
+
++ new sequence start: don't blend over from the last element, but from either
+  the current color (best) or black.
++ get current sequence.
++ set aux.
++ proper frequency (almost there, need to fine tune)
+/ store current sequence in eeprom after some time ? Round robin
++ if there was a usb-receive: increment the pwm counter roughly towards the right value to reduce flicker. Can we use the clock counter ?
++ setting sequence beyond given range.
++ white-balance: in eeprom ? (no hardcoded; 90% blue)
++ limit current
++ bug: conversion
++ new sequence starts right away
++ implement: get current color
++ serial number: in eeprom ?
++ store current limit flag in eeprom ?)
+
+
+
+-- production test
+- can we set the serial number ?
+- Is the current limited correctly ?
+- debug enabled off.
