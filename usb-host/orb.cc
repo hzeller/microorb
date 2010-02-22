@@ -34,7 +34,7 @@ static int usage(const char *prog) {
 // Open first usable orb. If serial number is requested, with that serial number.
 // Do up to three retries on failure.
 static struct MicroOrb *open_orb(const char *request_serial) {
-  const int kRetries = 3;
+  const int kRetries = 8;
   for (int i = 0 ; i < kRetries; ++i) {
     MicroOrb::DeviceList devices;
     MicroOrb::UsbList(&devices);

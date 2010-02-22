@@ -11,9 +11,15 @@
 
 static const int kMaxSequenceLen = 16;  // Max number of colors sent to Orb.
 static const int kUsbTimeoutMs = 1500;
-static const int kUsbRetries = 3;       // Retries in case of usb bus error.
 
-/* we use as vendor 'Prototype product Vendor ID' */
+// The timing in the orb firmware is tight and we seem to service the USB
+// interrupts not always in time - which leads to problems on the USB bus.
+// This happens relatively rarely in regular mode (read: one color set), but
+// can get higher with a larger sequence sent to the orb making it busy. So
+// allow for some retries in case of failures.
+static const int kUsbRetries = 25;      // Retries in case of usb bus error.
+
+// we use as vendor 'Prototype product Vendor ID'
 #define ORB_VENDOR  0x6666
 #define ORB_PRODUCT 0xF00D
 
@@ -112,6 +118,8 @@ string MicroOrb::FormatCapabilitiesString(const struct orb_capabilities_t &c) {
   return out;
 }
 
+// Older orbs don't support the current limiting in firmware. So do it here in
+// case we'd reach the 500mA limit by scaling the individual colors.
 void MicroOrb::LEDCurrentLimit(struct orb_sequence_t *seq) {
   if (IsOrb4()) return;  // we're good.
 
@@ -130,6 +138,24 @@ void MicroOrb::LEDCurrentLimit(struct orb_sequence_t *seq) {
     }
   }
 }
+
+// Checks if the sequence a and b are the same
+static bool SequenceEqual(const struct orb_sequence_t &a,
+                          const struct orb_sequence_t &b) {
+  if (a.count != b.count) return false;
+  for (int i = 0; i < a.count; ++i) {
+    const struct orb_color_period_t &p1 = a.period[i];
+    const struct orb_color_period_t &p2 = b.period[i];
+    if (p1.morph_time != p2.morph_time
+        || p1.hold_time != p2.hold_time
+        || p1.color.red != p2.color.red
+        || p1.color.green != p2.color.green
+        || p1.color.blue != p2.color.blue)
+      return false;
+  }
+  return true;
+}
+
 bool MicroOrb::SetSequence(const struct orb_sequence_t &sequence) {
   // Don't overwhelm older orbs with long color sequence.
   const int real_count = IsOrb4() ? sequence.count : 1;
@@ -138,7 +164,24 @@ bool MicroOrb::SetSequence(const struct orb_sequence_t &sequence) {
   // If we have an old orb, we need to take care of some current limiting.
   struct orb_sequence_t current_limited = sequence;
   LEDCurrentLimit(&current_limited);
-  return Send(ORB_SETSEQUENCE, &current_limited, data_len);
+  for (int i = 0; i < kUsbRetries; ++i) {
+    if (!Send(ORB_SETSEQUENCE, &current_limited, data_len))
+      return false;
+
+    // Unfortunately, sometimes things don't work out properly due to timing
+    // issuesand data gets garbled especially with longer sequences.
+    // Retrieve the current sequence and verify that it is indeed the same we
+    // sent.
+
+    if (!IsOrb4())
+      return true;   // Old orbs don't support GetSequence()
+
+    struct orb_sequence_t verify;
+    GetSequence(&verify);
+    if (SequenceEqual(current_limited, verify))
+      return true;
+  }
+  return false;
 }
 
 bool MicroOrb::GetSequence(struct orb_sequence_t *sequence) {
