@@ -115,7 +115,8 @@ string MicroOrb::FormatCapabilitiesString(const struct orb_capabilities_t &c) {
 void MicroOrb::LEDCurrentLimit(struct orb_sequence_t *seq) {
   if (IsOrb4()) return;  // we're good.
 
-  // We want at most 500mA. Each LED takes empirically around 280mA.
+  // We want at most 500mA. Each LED takes empirically around 280mA. The current
+  // is mapped on a range of 0..255.
   const float max_value = 500.0/280.0 * 255.0;
   for (int i = 0; i < seq->count; ++i) {
     int total_current = (seq->period[i].color.red
