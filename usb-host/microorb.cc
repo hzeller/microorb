@@ -26,8 +26,9 @@ void MicroOrb::UsbList(DeviceList *result) {
     for (struct usb_device* dev = bus->devices; dev; dev = dev->next) {
       const bool is_orb = (dev->descriptor.idVendor == ORB_VENDOR
                            && dev->descriptor.idProduct == ORB_PRODUCT);
-      if (is_orb)
+      if (is_orb) {
         result->push_back(dev);
+      }
     }
   }
 }
