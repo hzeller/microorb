@@ -74,6 +74,10 @@ class MicroOrb {
   // to call this function than the getting the capabilities.
   bool IsOrb4() const;
 
+  // Some legacy; older orbs don't do current limiting, so it could be that
+  // colors that use multiple LEDs can suck too much current. Fix it here.
+  void LEDCurrentLimit(struct orb_sequence_t *sequence);
+
   const struct usb_device *const device_;
   struct usb_dev_handle *const handle_;
   string serial_;

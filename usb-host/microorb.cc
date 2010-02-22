@@ -112,12 +112,32 @@ string MicroOrb::FormatCapabilitiesString(const struct orb_capabilities_t &c) {
   return out;
 }
 
+void MicroOrb::LEDCurrentLimit(struct orb_sequence_t *seq) {
+  if (IsOrb4()) return;  // we're good.
+
+  // We want at most 500mA. Each LED takes empirically around 280mA.
+  const float max_value = 500.0/280.0 * 255.0;
+  for (int i = 0; i < seq->count; ++i) {
+    int total_current = (seq->period[i].color.red
+                         + seq->period[i].color.green
+                         + seq->period[i].color.blue);
+    if (total_current > max_value) {
+      const float factor = max_value / total_current;
+      seq->period[i].color.red *= factor;
+      seq->period[i].color.green *= factor;
+      seq->period[i].color.blue *= factor;
+    }
+  }
+}
 bool MicroOrb::SetSequence(const struct orb_sequence_t &sequence) {
   // Don't overwhelm older orbs with long color sequence.
   const int real_count = IsOrb4() ? sequence.count : 1;
   const int data_len = (sizeof(sequence.count)
                         + real_count * sizeof(struct orb_color_period_t));
-  return Send(ORB_SETSEQUENCE, &sequence, data_len);
+  // If we have an old orb, we need to take care of some current limiting.
+  struct orb_sequence_t current_limited = sequence;
+  LEDCurrentLimit(&current_limited);
+  return Send(ORB_SETSEQUENCE, &current_limited, data_len);
 }
 
 bool MicroOrb::GetSequence(struct orb_sequence_t *sequence) {
