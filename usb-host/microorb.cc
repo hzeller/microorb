@@ -56,6 +56,8 @@ MicroOrb::~MicroOrb() {
 }
 
 bool MicroOrb::IsOrb4() const {
+  // First handsoldered orbs (internally known as Orb3) have 0x0103, the
+  // SMT manufactured Orb4 have 0x0104 in their device version number.
   return device_->descriptor.bcdDevice == 0x0104;
 }
 
