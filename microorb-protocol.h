@@ -3,7 +3,8 @@
 //
 // GPL license.
 //
-// Shared data structures for the protocol between firmware and hostware.
+// Shared data structures for the protocol between firmware and hostware,
+// thus pure C.
 //
 // Protocol
 // The protocol between the orb and the host on the other end of the USB
@@ -73,7 +74,7 @@ struct orb_capabilities_t {
   unsigned char reserved2;        // yeah, fixed size format, you know ...
 };
 
-// USB control message request (described in header documentation on top)
+// USB control message request (described in header documentation on top).
 enum OrbRequest {
   ORB_SETSEQUENCE,
   ORB_GETCAPABILITIES,
@@ -83,7 +84,7 @@ enum OrbRequest {
   ORB_POKE_EEPROM,
 };
 
-// A struct used to hold a RGB color.
+// A struct to hold a RGB color.
 struct orb_rgb_t {
   unsigned char red;
   unsigned char green;

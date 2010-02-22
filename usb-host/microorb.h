@@ -21,11 +21,14 @@ class MicroOrb {
   typedef vector<struct usb_device*> DeviceList;
   static void UsbList(DeviceList *result);
 
-  // Open a MicroOrb from an usb device or NULL if not possible for some reason.
+  // Create a MicroOrb from an usb device or NULL on failure.
+  // The usb_device should be retrieved using the UsbList() function.
   static MicroOrb* Open(struct usb_device *device);
 
   // Get the serial number of this orb or an empty string if for some reason
   // not retrievable.
+  // Each orb has a unique serial number (something like "MTV0042") so that it
+  // is possible to address a specific one if multiple are connected.
   const string& GetSerial();
 
   // Get capabilities.

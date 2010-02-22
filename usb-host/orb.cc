@@ -1,7 +1,8 @@
 // Copyright 2008 Google Inc. All Rights Reserved.
 // Author: hzeller@google.com (Henner Zeller)
 //
-// Talk to the microorb.
+// Talk to the microorb. Commandline interface to class MicroOrb.
+//
 // GPL license.
 // This requires libusb (tested on Linux and MacOS)
 

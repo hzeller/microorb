@@ -13,18 +13,18 @@ static const int kMaxSequenceLen = 16;  // Max number of colors sent to Orb.
 static const int kUsbTimeoutMs = 1500;
 
 // The timing in the orb firmware is tight and we seem to service the USB
-// interrupts not always in time - which leads to problems on the USB bus.
-// This happens relatively rarely in regular mode (read: one color set), but
-// can get higher with a larger sequence sent to the orb making it busy. So
-// allow for some retries in case of failures.
+// interrupts not always in time - which leads to broken communication on the
+// bus sometimes if we send long sequences.
+// So allow for some retries in case of failures.
 static const int kUsbRetries = 25;      // Retries in case of usb bus error.
 
 // Memory offset of the current limiting byte in the EEPROM of newer orbs.
 static const int kCurrentLimitEepromOffset = 16;
 
-// we use as vendor 'Prototype product Vendor ID'
-#define ORB_VENDOR  0x6666
-#define ORB_PRODUCT 0xF00D
+// The Vendor-ID is usually assigned by some central USB committee for
+// cash; We just use the free-to-use 'Prototype product Vendor ID'
+static const int kUsbOrbVendor  = 0x6666;
+static const int kUsbOrbProduct = 0xF00D;  // Thinking of lunch already ?
 
 void MicroOrb::UsbList(DeviceList *result) {
   usb_init();
@@ -33,8 +33,8 @@ void MicroOrb::UsbList(DeviceList *result) {
 
   for (struct usb_bus* bus = usb_busses; bus; bus = bus->next) {
     for (struct usb_device* dev = bus->devices; dev; dev = dev->next) {
-      const bool is_orb = (dev->descriptor.idVendor == ORB_VENDOR
-                           && dev->descriptor.idProduct == ORB_PRODUCT);
+      const bool is_orb = (dev->descriptor.idVendor == kUsbOrbVendor
+                           && dev->descriptor.idProduct == kUsbOrbProduct);
       if (is_orb) {
         result->push_back(dev);
       }
@@ -122,7 +122,7 @@ string MicroOrb::FormatCapabilitiesString(const struct orb_capabilities_t &c) {
 }
 
 // Older orbs don't support the current limiting in firmware. So do it here in
-// case we'd reach the 500mA limit by scaling the individual colors.
+// case we'd reach the 500mA: limit by scaling the individual colors.
 void MicroOrb::LEDCurrentLimit(struct orb_sequence_t *seq) {
   if (IsOrb4()) return;  // we're good.
 
@@ -142,7 +142,7 @@ void MicroOrb::LEDCurrentLimit(struct orb_sequence_t *seq) {
   }
 }
 
-// Checks if the sequence a and b are the same
+// Checks if the sequence a and b are the same.
 static bool SequenceEqual(const struct orb_sequence_t &a,
                           const struct orb_sequence_t &b) {
   if (a.count != b.count) return false;
@@ -160,7 +160,7 @@ static bool SequenceEqual(const struct orb_sequence_t &a,
 }
 
 bool MicroOrb::SetSequence(const struct orb_sequence_t &sequence) {
-  // Don't overwhelm older orbs with long color sequence.
+  // Don't overwhelm older orbs with long color sequences.
   const int real_count = IsOrb4() ? sequence.count : 1;
   const int data_len = (sizeof(sequence.count)
                         + real_count * sizeof(struct orb_color_period_t));
