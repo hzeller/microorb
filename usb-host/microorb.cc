@@ -19,6 +19,9 @@ static const int kUsbTimeoutMs = 1500;
 // allow for some retries in case of failures.
 static const int kUsbRetries = 25;      // Retries in case of usb bus error.
 
+// Memory offset of the current limiting byte in the EEPROM of newer orbs.
+static const int kCurrentLimitEepromOffset = 16;
+
 // we use as vendor 'Prototype product Vendor ID'
 #define ORB_VENDOR  0x6666
 #define ORB_PRODUCT 0xF00D
@@ -161,9 +164,11 @@ bool MicroOrb::SetSequence(const struct orb_sequence_t &sequence) {
   const int real_count = IsOrb4() ? sequence.count : 1;
   const int data_len = (sizeof(sequence.count)
                         + real_count * sizeof(struct orb_color_period_t));
+
   // If we have an old orb, we need to take care of some current limiting.
   struct orb_sequence_t current_limited = sequence;
   LEDCurrentLimit(&current_limited);
+
   for (int i = 0; i < kUsbRetries; ++i) {
     if (!Send(ORB_SETSEQUENCE, &current_limited, data_len))
       return false;
@@ -234,5 +239,5 @@ bool MicroOrb::SwitchCurrentLimit(bool value) {
   char to_send = ORB_SWITCH_CURRENT_LIMIT_OFF_MAGIC;
   if (value)
     to_send = ~to_send;
-  return PokeEeprom(16, &to_send, 1);
+  return PokeEeprom(kCurrentLimitEepromOffset, &to_send, 1);
 }
