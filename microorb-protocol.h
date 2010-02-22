@@ -30,7 +30,7 @@ struct orb_capabilities_t {
 };
 
 enum OrbRequest {
-  ORB_SETCOLOR,
+  ORB_SETSEQUENCE,
   ORB_GETCAPABILITIES,
   ORB_SETAUX,
   ORB_GETCOLOR,
@@ -39,14 +39,15 @@ enum OrbRequest {
 };
 
 struct orb_rgb_t {
-  unsigned char r;
-  unsigned char g;
-  unsigned char b;
+  unsigned char red;
+  unsigned char green;
+  unsigned char blue;
 };
 
-// One color with fade-in time and hold time. Element of a sequence.
+// A sequence element consists of the color, the time to morph to that color
+// and the time to hold the color.
 struct orb_color_period_t {
-  struct orb_rgb_t rgb;
+  struct orb_rgb_t color;
   unsigned char morph_time;  // time to morph to the this color in 250ms steps
   unsigned char hold_time;   // time to hold this color in 250ms steps
 };

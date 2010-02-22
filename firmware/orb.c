@@ -85,6 +85,7 @@
 #include <util/delay.h>
 
 #include "usb.h"
+#include "../microorb-protocol.h"
 
 #define COMPILE_ASSERT(x) uchar compile_assert_[(x) ? 0 : -1]
 
@@ -136,61 +137,13 @@ enum {
 #  define DEBUG_BIT 0
 #endif
 
-// ---- The following enums and structs are known as well to the host
-//      program as they're used in the communication (might become an include?)
-enum Request {
-    ORB_SETSEQUENCE,
-    ORB_GETCAPABILITIES,
-    ORB_SETAUX,       // This orb does not provide SETAUX
-    ORB_GETCOLOR,
-    ORB_GETSEQUENCE,
-    ORB_POKE_EEPROM,
-};
-
-enum CapabilityFlags {
-    HAS_GET_COLOR      = 0x01,
-    HAS_GET_SEQUENCE   = 0x02,
-    HAS_AUX            = 0x04,
-    HAS_GAMMA_CORRECT  = 0x08,
-    HAS_CURRENT_LIMIT  = 0x10
-    /* more to come */
-};
-
-struct capabilities_t {
-    uchar flags;
-    uchar max_sequence_len;
-    uchar version;
-    uchar reserved2;
-};
-
-// A color; non-gamma corrected values from 0..255
-struct rgb_t {
-    uchar red;
-    uchar green;
-    uchar blue;
-};
-
-// A sequence element consists of the color, the time to morph to that color
-// and the time to hold the color.
-struct color_period_t {
-    struct rgb_t col;
-    uchar morph_time;  // time to morph to the this color in 250ms steps
-    uchar hold_time;   // time to hold this color in 250ms steps
-};
-
-// A sequence as set by the user. We only have one sequence in memory for
+// A sequence as set by the user.
+// We only have one sequence in memory for
 // space reasons; it would be better to have two (one for writing from usb and
 // one for reading) and flip between these. But we don't have enough memory for
 // that. And the worst that could happen due to this 'race' is a brief color
 // glitch.
-struct sequence_t {
-    uchar count;
-    struct color_period_t period[ MAX_SEQUENCE_LEN ];
-};
-
-// ---- End host known data structures.
-
-static struct sequence_t sequence;  // There is one global sequence.
+static struct orb_sequence_t sequence;  // There is one global sequence.
 
 // New sequence data arrived. Set by the USB callback once all data has been
 // received and stored in the global sequence.
@@ -240,8 +193,8 @@ static struct colormorph_t morph;   // Only one global morph state.
 
 // Prepare the global morph data structure to morph from the current color to
 // the target color - given the morph- and hold-time request in target.
-static void colormorph_prepare(const struct rgb_t *current,
-                               const struct color_period_t *target);
+static void colormorph_prepare(const struct orb_rgb_t *current,
+                               const struct orb_color_period_t *target);
 
 // Morph one step, return 'false' when we're done with morphing, i.e. all
 // morph and hold iterations are completed.
@@ -273,7 +226,7 @@ uchar ee_current_limit EEMEM = ~SWITCH_CURRENT_LIMIT_OFF_MAGIC;
 // Initial sequence - stored in eeprom. We set it to the Google colors to
 // have some feedback when plugging in the USB.
 // With the POKE_EEPROM it can be set to anything by a knowledgable user ;)
-static struct sequence_t ee_initial_sequence EEMEM = {
+static struct orb_sequence_t ee_initial_sequence EEMEM = {
     12,
     {
         { { 0x00, 0x00, 0x00 }, 0, 2 },   // initially briefly black.
@@ -325,7 +278,7 @@ extern byte_t usb_setup ( byte_t data[8] )
         break;
 
     case ORB_GETCAPABILITIES: {
-        struct capabilities_t *cap = (struct capabilities_t*) data;
+        struct orb_capabilities_t *cap = (struct orb_capabilities_t*) data;
         cap->flags = (HAS_GET_COLOR | HAS_GAMMA_CORRECT
                       | HAS_AUX | HAS_GET_SEQUENCE
                       | (do_current_limit ? HAS_CURRENT_LIMIT : 0));
@@ -368,7 +321,7 @@ static struct transmit_buffer_t {
 uchar tx_sequence_count;
 
 // Data_left must be able to hold the size of a sequence.
-COMPILE_ASSERT(sizeof(struct sequence_t) <= 255);
+COMPILE_ASSERT(sizeof(struct orb_sequence_t) <= 255);
 
 extern void usb_out( byte_t *data, byte_t len) {
     switch (input_mode) {
@@ -382,7 +335,8 @@ extern void usb_out( byte_t *data, byte_t len) {
             // We override the sequence we currently have in memory. This is a
             // benign race; worst that could happen is a wrong color briefly.
             txbuf.data = (char*) &sequence.period;
-            txbuf.data_left = tx_sequence_count * sizeof(struct color_period_t);
+            txbuf.data_left = (tx_sequence_count
+                               * sizeof(struct orb_color_period_t));
         }
         if (txbuf.data_left > 0) {
             const uchar to_read = txbuf.data_left > len ? len : txbuf.data_left;
@@ -423,7 +377,8 @@ extern byte_t usb_in( byte_t *data, byte_t len ) {
     case GET_SEQUENCE: {
         if (txbuf.data_left == 0) {  // new start.
             txbuf.data = (char*) &sequence;
-            txbuf.data_left = sequence.count * sizeof(struct color_period_t) + 1;
+            txbuf.data_left = (sequence.count
+                               * sizeof(struct orb_color_period_t) + 1);
         }
         if (txbuf.data_left > 0) {
             const uchar to_read = txbuf.data_left > len ? len : txbuf.data_left;
@@ -574,16 +529,16 @@ static void fixedpoint_increment(struct fixedpoint_t *value) {
     value->value.full_resolution += value->scaled_diff;
 }
 
-static void colormorph_prepare(const struct rgb_t *current,
-                               const struct color_period_t *target) {
+static void colormorph_prepare(const struct orb_rgb_t *current,
+                               const struct orb_color_period_t *target) {
     // PWM_FREQUENCY_HZ / 4, because times are in 250ms steps.
     morph.morph_iterations = PWM_FREQUENCY_HZ / 4 * target->morph_time;
     morph.hold_iterations  = PWM_FREQUENCY_HZ / 4 * target->hold_time;
-    fixedpoint_set_difference(&morph.red, current->red, target->col.red,
+    fixedpoint_set_difference(&morph.red, current->red, target->color.red,
                               morph.morph_iterations);
-    fixedpoint_set_difference(&morph.green, current->green, target->col.green,
+    fixedpoint_set_difference(&morph.green, current->green, target->color.green,
                               morph.morph_iterations);
-    fixedpoint_set_difference(&morph.blue, current->blue, target->col.blue,
+    fixedpoint_set_difference(&morph.blue, current->blue, target->color.blue,
                               morph.morph_iterations);
 }
 
@@ -640,7 +595,7 @@ int main(void)
     byte_t *src = (byte_t*) &ee_initial_sequence;
     byte_t *dst = (byte_t*) &sequence;
     byte_t i;
-    for (i = 0; i < sizeof(struct sequence_t); ++i, ++src, ++dst)
+    for (i = 0; i < sizeof(struct orb_sequence_t); ++i, ++src, ++dst)
         *dst = eeprom_read_byte(src);
 
     current_limit_init();
@@ -655,7 +610,7 @@ int main(void)
     pwm_segments[3].mask = DEBUG_BIT;
     set_rgb(0, 0, 0);         // initialize the rest of the fields.
 
-    colormorph_prepare(&sequence.period[0].col, &sequence.period[0]);
+    colormorph_prepare(&sequence.period[0].color, &sequence.period[0]);
 
     txbuf.data_left = 0;
     uchar s = 0;
@@ -672,7 +627,7 @@ int main(void)
 #   define PWM_ACCESS pwm++
 #endif
 
-    struct rgb_t last_color;
+    struct orb_rgb_t last_color;
 
     PWM_COUNTER_RESET;
 
@@ -714,11 +669,11 @@ int main(void)
                     } else {
                         // The get-color reads from the morph structure. So
                         // initialize it here.
-                        colormorph_prepare(&sequence.period[0].col,
+                        colormorph_prepare(&sequence.period[0].color,
                                            &sequence.period[0]);
-                        set_rgb(sequence.period[0].col.red,
-                                sequence.period[0].col.green,
-                                sequence.period[0].col.blue);
+                        set_rgb(sequence.period[0].color.red,
+                                sequence.period[0].color.green,
+                                sequence.period[0].color.blue);
                     }
                     new_sequence_data = false;
                 }
@@ -727,7 +682,7 @@ int main(void)
                     current_sequence = (current_sequence + 1) % sequence.count;
                     colormorph_prepare(&last_color,
                                        &sequence.period[current_sequence]);
-                    last_color = sequence.period[current_sequence].col;
+                    last_color = sequence.period[current_sequence].color;
                 }
 
                 s = 0;

@@ -88,9 +88,9 @@ int parse_color_spec(const char *str, struct orb_rgb_t *out,
             str);
     return 0;
   }
-  out->r = r;
-  out->g = g;
-  out->b = b;
+  out->red = r;
+  out->green = g;
+  out->blue = b;
   if (params >= 4 && morphtime) *morphtime = m;
   if (params >= 5 && duration) *duration = d;
   return params;
@@ -100,7 +100,7 @@ static bool print_orb_color(MicroOrb *orb) {
   struct orb_rgb_t color;
   if (!orb->GetColor(&color))
     return false;
-  fprintf(stdout, "%02x%02x%02x\n", color.r, color.g, color.b);
+  fprintf(stdout, "%02x%02x%02x\n", color.red, color.green, color.blue);
   return true;
 }
 
@@ -109,7 +109,7 @@ static void format_sequence(const struct orb_sequence_t *seq) {
   for (i = 0; i < seq->count; ++i) {
     const struct orb_color_period_t *period = &seq->period[i];
     fprintf(stderr, "%02x%02x%02x:%d:%d ",
-            period->rgb.r, period->rgb.g, period->rgb.b,
+            period->color.red, period->color.green, period->color.blue,
             period->morph_time * 250, period->hold_time * 250);
   }
   fprintf(stderr, "\n");
@@ -237,7 +237,7 @@ int main(int argc, char **argv) {
         morph = 0;
         duration = 200;
         if (parse_color_spec(argv[i + kArgOffset],
-                             &seq.period[i].rgb, &morph, &duration) < 3) {
+                             &seq.period[i].color, &morph, &duration) < 3) {
           return usage(argv[0]);
         }
         morph = (morph + 249) / 250;

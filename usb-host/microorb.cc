@@ -116,7 +116,7 @@ bool MicroOrb::SetSequence(const struct orb_sequence_t &sequence) {
   const int real_count = IsOrb4() ? sequence.count : 1;
   const int data_len = (sizeof(sequence.count)
                         + real_count * sizeof(struct orb_color_period_t));
-  return Send(ORB_SETCOLOR, &sequence, data_len);
+  return Send(ORB_SETSEQUENCE, &sequence, data_len);
 }
 
 bool MicroOrb::GetSequence(struct orb_sequence_t *sequence) {
@@ -131,7 +131,7 @@ bool MicroOrb::GetCapabilities(struct orb_capabilities_t *capabilities) {
 bool MicroOrb::SetColor(const struct orb_rgb_t &color) {
   orb_sequence_t data;
   data.count = 1;
-  data.period[0].rgb = color;
+  data.period[0].color = color;
   data.period[0].morph_time = 0;
   data.period[0].hold_time = 1;
   return SetSequence(data);
