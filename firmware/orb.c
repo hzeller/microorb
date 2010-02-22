@@ -3,10 +3,12 @@
  * This softare is GPL licensed.
  *
  * We have 4k flash and 256 bytes RAM (of which are already ~1700 bytes flash
- * and ~50 bytes RAM used by the USB implementation), but want all these
- * Features
- *  + setting a single color
- *  - switching the AUX port  (not anymore in this version of the Microorb)
+ * and ~50 bytes RAM used by the USB implementation), but want all the following
+ * Features.
+ *
+ * These had been in the 2k version of the Orb
+ *  + setting a single color.
+ *  + switching the AUX port.
  *
  * These features have been added since the 2k version of the initial orb:
  *  + set multiple colors and cycle between them according to the 'hold' time.
@@ -28,49 +30,7 @@
  *  - Do the PWM in an interrupt handler. (won't work because of USB timing
  *    restrictions).
  *
- * Protocol
- * The protocol between the orb and the host on the other end of the USB
- * allows for commands described in enum Request.
- *
- * --- ORB_SET_SEQUENCE (host -> orb). Always implemented. ---
- * The protocol for setting a sequence of colors is the number of sequence
- * elements followed by 5 byte structs containing the color and times.
- * ----------
- * struct sequence_t {
- *  uchar sequence_elements;
- *  struct {
- *      uchar red;
- *      uchar green;
- *      uchar blue;
- *      uchar morph_time;  // time to morph to the this color in 250ms steps
- *      uchar hold_time;   // time to hold this color in 250ms steps
- *  } sequence[sequence_elements];
- * }
- *  -----------
- *  The whole sequence is repeated by the orb as soon as the data has been
- *  transmitted.
- *  If the sequence only contains one element, then hold_time and morph_time
- *  are effectivly irrelevant.
- *
- * --- ORB_GETCAPABILITIES (orb -> host). Always implemented. ---
- * Returns a struct capabilities_t that contains flags that describe the
- * capabilities of this orb and the number of elements it allows in a sequence.
- * (The simplest solution should allow for one element in the sequence which
- *  basically means: set color)
- *
- * --- ORB_SETAUX (host -> orb). Only implemented if HAS_AUX. ---
- * If capability HAS_AUX, then the single written byte corresponds to the
- * bits on the aux port (not in this version of the Orb. The first one had
- * hardware for it, but was never used).
- *
- * --- ORB_GETCOLOR (orb -> host). Only implemented if HAS_GET_COLOR. ---
- * Get the currently displayed color. If this orb is morphing between two
- * colors, then this is the current intermediate color. Returns three bytes
- * with red, green, blue.
- *
- * --- ORB_GETSEQUENCE (orb -> host). Only implemented if HAS_GET_SEQUENCE. ---
- * Returns the full sequence currently being handled in the same format as
- * used in ORB_SET_SEQUENCE.
+ * For details on the protocol, see microorb-protocol.h
  */
 
 #define AVR_MHZ 12
