@@ -1,8 +1,8 @@
 
-CFLAGS=-Wall
+CXXFLAGS=-Wall
 
-orb : orb.o
-	$(CXX) -lusb $< -o $@
+orb : orb.o microorb.o
+	$(CXX) -lusb $^ -o $@
 
 clean:
-	rm -f orb orb.o
+	rm -f orb orb.o microorb.o
