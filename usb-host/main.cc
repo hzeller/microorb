@@ -15,8 +15,10 @@
 using orb_driver::MicroOrb;
 
 static int usage(const char *prog) {
-  fprintf(stderr, "usage: %s [options] <RGB-Hex> [<RGB-Hex> ...]\n"
-          "Just supply a list of hex colors in the form 'ff0000'\n"
+  fprintf(stderr,
+          "usage: %s [options] <RGB-Hex>[:<morph-ms>[:<hold-ms>]] [<RGB>...]\n"
+          "Just supply a list of one or more hex colors like: FF0000\n"
+          ".. or with transition times: FF0000:500:3000 00FF00:500:3000\n"
           "\n\thttp://go/microorb/manual\n\n"
           "Options:\n"
           " -s <orb-serial>   : Address a MicroOrb with a particular"
@@ -25,7 +27,7 @@ static int usage(const char *prog) {
           " attached.\n"
           " -l                : List all attached Orbs with serial# and"
           " capabilities.\n"
-          " -g                : Get current color if supported.\n"
+          " -g                : Get current color.\n"
           " -G                : Get current sequence if supported.\n"
           " -v                : Verbose.\n"
           " -x <1|on|0|off>   : Switch aux on/off\n",
@@ -222,6 +224,17 @@ int main(int argc, char **argv) {
     }
   }
 
+  const int kArgOffset = optind;
+  const int arg_num = argc - kArgOffset;
+
+  if (mode == SET_COLOR_SEQUENCE && arg_num == 0) {
+      // No colors given, show help and list available orbs.
+      usage(argv[0]);
+      fprintf(stderr, "-- Connected orbs --\n");
+      ListAvailableOrbSerials();
+      return 1;
+  }
+
   if (mode == LIST_DEVICES) {
     return ListAvailableOrbSerials() ? 0 : 1;
   }
@@ -248,17 +261,12 @@ int main(int argc, char **argv) {
   } else if (mode == SET_AUX) {
     return orb->SetAux(aux_value) ? 0 : 1;
   } else {
-    const int kArgOffset = optind;
-
-    // Number of colors we got.
-    const int color_num = argc - kArgOffset;
-
-    if (color_num == 0) {
+    if (arg_num == 0) {
       return usage(argv[0]);
     }
 
     struct orb_sequence_t seq;
-    if (!ParseSequence(argv + kArgOffset, color_num, &seq))
+    if (!ParseSequence(argv + kArgOffset, arg_num, &seq))
       usage(argv[0]);
     if (verbose) FormatSequence(&seq);
     orb->SetSequence(seq);
