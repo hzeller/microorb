@@ -244,7 +244,7 @@ extern byte_t usb_setup ( byte_t data[8] )
                       | (do_current_limit ? HAS_CURRENT_LIMIT : 0));
         cap->max_sequence_len = MAX_SEQUENCE_LEN;
         cap->version = 1;
-        cap->reserved2 = 0;
+        cap->reserved = 0;
         retval = sizeof(*cap);
         break;
     }

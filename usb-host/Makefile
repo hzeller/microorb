@@ -1,8 +1,8 @@
 
 CXXFLAGS=-Wall
 
-orb : orb.o microorb.o
+microorb : main.o microorb.o
 	$(CXX) -lusb $^ -o $@
 
 clean:
-	rm -f orb orb.o microorb.o
+	rm -f microorb main.o microorb.o

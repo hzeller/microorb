@@ -1,8 +1,6 @@
 // Copyright 2008 Google Inc. All Rights Reserved.
 // Author: hzeller@google.com (Henner Zeller)
 //
-// GPL license.
-//
 // Shared data structures for the protocol between firmware and hostware,
 // thus pure C.
 //
@@ -50,8 +48,8 @@
 // Returns the full sequence currently being handled in the same format as
 // used in ORB_SET_SEQUENCE (dynamically sized struct orb_sequence_t)
 
-#ifndef MICROORB_PROTOCOL_H
-#define MICROORB_PROTOCOL_H
+#ifndef TESTING_ORB_DRIVERS_MICROORB_MICROORB_PROTOCOL_H_
+#define TESTING_ORB_DRIVERS_MICROORB_MICROORB_PROTOCOL_H_
 
 #define ORB_MAX_SEQUENCE 16
 
@@ -67,21 +65,22 @@ enum OrbCapabilityFlags {    // Does the orb ...
   /* more to come */
 };
 
+// Capabilities, returned by the orb on the ORB_GETCAPABILITIES request.
 struct orb_capabilities_t {
-  unsigned char flags;            // OR'ed set of OrbCapabilityFlags
-  unsigned char max_sequence_len; // maximum number of colors in sequence
-  unsigned char version;          // Firmware version (0 and 1 for now)
-  unsigned char reserved2;        // yeah, fixed size format, you know ...
+  unsigned char flags;             // OR'ed set of OrbCapabilityFlags
+  unsigned char max_sequence_len;  // Maximum number of colors in sequence
+  unsigned char version;           // Firmware version (0 and 1 for now)
+  unsigned char reserved;
 };
 
 // USB control message request (described in header documentation on top).
 enum OrbRequest {
-  ORB_SETSEQUENCE,
-  ORB_GETCAPABILITIES,
-  ORB_SETAUX,
-  ORB_GETCOLOR,
-  ORB_GETSEQUENCE,
-  ORB_POKE_EEPROM,
+  ORB_SETSEQUENCE        = 0,  // IN  orb_sequence_t    ; always implemented.
+  ORB_GETCAPABILITIES    = 1,  // OUT orb_capabilities_t; always implemented.
+  ORB_SETAUX             = 2,  // IN  byte              ; optional (see flags)
+  ORB_GETCOLOR           = 3,  // OUT orb_rgb_t         ; optional (see flags)
+  ORB_GETSEQUENCE        = 4,  // OUT orb_sequence_t    ; optional (see flags)
+  ORB_POKE_EEPROM        = 5,  // IN  <offset> <bytes>  ; optional (Orb4)
 };
 
 // A struct to hold a RGB color.
@@ -107,4 +106,4 @@ struct orb_sequence_t {
   struct orb_color_period_t period[ ORB_MAX_SEQUENCE ];
 };
 
-#endif /* MICROORB_PROTOCOL_H */
+#endif  // TESTING_ORB_DRIVERS_MICROORB_MICROORB_PROTOCOL_H_

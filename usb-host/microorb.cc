@@ -1,13 +1,13 @@
 // Copyright 2008 Google Inc. All Rights Reserved.
 // Author: hzeller@google.com (Henner Zeller)
-//
-// GPL license.
 
 #include "microorb.h"
 
 #include <string.h>
-#include <usb.h>
 #include <assert.h>
+#include <algorithm>
+
+#include <usb.h>
 
 static const int kMaxSequenceLen = 16;  // Max number of colors sent to Orb.
 static const int kUsbTimeoutMs = 1500;
@@ -26,13 +26,15 @@ static const int kCurrentLimitEepromOffset = 16;
 static const int kUsbOrbVendor  = 0x6666;
 static const int kUsbOrbProduct = 0xF00D;  // Thinking of lunch already ?
 
+namespace orb_driver {
+
 void MicroOrb::UsbList(DeviceList *result) {
   usb_init();
   usb_find_busses();
   usb_find_devices();
 
-  for (struct usb_bus* bus = usb_busses; bus; bus = bus->next) {
-    for (struct usb_device* dev = bus->devices; dev; dev = dev->next) {
+  for (struct usb_bus *bus = usb_busses; bus; bus = bus->next) {
+    for (struct usb_device *dev = bus->devices; dev; dev = dev->next) {
       const bool is_orb = (dev->descriptor.idVendor == kUsbOrbVendor
                            && dev->descriptor.idProduct == kUsbOrbProduct);
       if (is_orb) {
@@ -92,11 +94,11 @@ bool MicroOrb::Receive(enum OrbRequest command,
   return result >= 0;
 }
 
-const string& MicroOrb::GetSerial() {
+const std::string& MicroOrb::GetSerial() {
   if (!serial_.empty())
     return serial_;
   if (device_->descriptor.iSerialNumber == 0)
-    return serial_;  // we expect a version, but there is none.
+    return serial_;  // No version available in descriptor; return empty.
 
   char device_serial[64];
   if (usb_get_string_simple(handle_, device_->descriptor.iSerialNumber,
@@ -107,13 +109,14 @@ const string& MicroOrb::GetSerial() {
   return serial_;
 }
 
-static void AddCommaString(const string& msg, string *out) {
+static void AddCommaString(const std::string& msg, std::string *out) {
   if (!out->empty()) out->append(",");
   out->append(msg);
 }
 
-string MicroOrb::FormatCapabilitiesString(const struct orb_capabilities_t &c) {
-  string out;
+std::string MicroOrb::FormatCapabilitiesString(
+    const struct orb_capabilities_t &c) {
+  std::string out;
   if (c.flags & HAS_GET_COLOR)     AddCommaString("get-current-color", &out);
   if (c.flags & HAS_GET_SEQUENCE)  AddCommaString("get-sequence", &out);
   if (c.flags & HAS_AUX)           AddCommaString("aux", &out);
@@ -130,7 +133,7 @@ void MicroOrb::LEDCurrentLimit(struct orb_sequence_t *seq) {
 
   // We want at most 500mA. Each LED takes empirically around 280mA. The current
   // is mapped on a range of 0..255.
-  const float max_value = 500.0/280.0 * 255.0;
+  const float max_value = 500.0 / 280.0 * 255.0;
   for (int i = 0; i < seq->count; ++i) {
     int total_current = (seq->period[i].color.red
                          + seq->period[i].color.green
@@ -176,7 +179,7 @@ bool MicroOrb::SetSequence(const struct orb_sequence_t &sequence) {
       return false;
 
     // Unfortunately, sometimes things don't work out properly due to timing
-    // issuesand data gets garbled especially with longer sequences.
+    // issues and data gets garbled especially with longer sequences.
     // Retrieve the current sequence and verify that it is indeed the same we
     // sent.
 
@@ -225,7 +228,7 @@ bool MicroOrb::PokeEeprom(int eeprom_offset, const void *buffer, int len) {
   // we only can write in chunks of 7
   const int kChunkSize = 7;
   for (int pos = eeprom_offset; pos < end_pos; pos += kChunkSize) {
-    int data_len = min(end_pos - pos, kChunkSize);
+    int data_len = std::min(end_pos - pos, kChunkSize);
     char poke_data[kChunkSize + 1];
     poke_data[0] = pos;
     const char *char_buf = reinterpret_cast<const char*>(buffer);
@@ -243,3 +246,4 @@ bool MicroOrb::SwitchCurrentLimit(bool value) {
     to_send = ~to_send;
   return PokeEeprom(kCurrentLimitEepromOffset, &to_send, 1);
 }
+}  // end namespace orb_driver

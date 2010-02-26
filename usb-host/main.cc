@@ -3,7 +3,6 @@
 //
 // Talk to the microorb. Commandline interface to class MicroOrb.
 //
-// GPL license.
 // This requires libusb (tested on Linux and MacOS)
 
 #include <stdio.h>
@@ -12,6 +11,8 @@
 #include <unistd.h>
 
 #include "microorb.h"
+
+using orb_driver::MicroOrb;
 
 static int usage(const char *prog) {
   fprintf(stderr, "usage: %s [options] <RGB-Hex> [<RGB-Hex> ...]\n"
@@ -32,9 +33,9 @@ static int usage(const char *prog) {
   return -1;
 }
 
-// Open first usable orb. If serial number is requested, with that serial number.
-// Do up to three retries on failure.
-static struct MicroOrb *open_orb(const char *request_serial) {
+// Open first usable orb. If serial number is requested, with that serial
+// number. Do up to three retries on failure.
+static MicroOrb *OpenOrb(const char *request_serial) {
   const int kRetries = 8;
   for (int i = 0 ; i < kRetries; ++i) {
     MicroOrb::DeviceList devices;
@@ -52,7 +53,7 @@ static struct MicroOrb *open_orb(const char *request_serial) {
   return NULL;
 }
 
-static bool list_available_orb_serials() {
+static bool ListAvailableOrbSerials() {
   MicroOrb::DeviceList devices;
   MicroOrb::UsbList(&devices);
   int count = 0;
@@ -80,8 +81,8 @@ static bool list_available_orb_serials() {
 // Color is defined as RRGGBB[:<optional-morph-ms>[:<optional-duration-ms]]
 // The RRGGBB values are hex, the duration values can be up to 60000ms and
 // will be quantized to 250ms.
-static int parse_color_spec(const char *str, struct orb_rgb_t *out,
-                            int *morphtime, int *duration) {
+static int ParseColorSpec(const char *str, struct orb_rgb_t *out,
+                          int *morphtime, int *duration) {
   int r, g, b;
   int m, d;
   int params;
@@ -104,8 +105,8 @@ static int parse_color_spec(const char *str, struct orb_rgb_t *out,
 
 // Parse a color sequence given on the command line and stuff it in an
 // orb_sequence_t struct.
-static bool parse_sequence(const char *const *args, int color_num,
-                           struct orb_sequence_t *seq) {
+static bool ParseSequence(const char *const *args, int color_num,
+                          struct orb_sequence_t *seq) {
   if (color_num > ORB_MAX_SEQUENCE) {
     color_num = ORB_MAX_SEQUENCE;
     fprintf(stderr, "Exceeded supported number of colors in sequence."
@@ -117,8 +118,7 @@ static bool parse_sequence(const char *const *args, int color_num,
   for (i = 0; i < color_num; ++i) {
     morph = 0;
     duration = 250;
-    if (parse_color_spec(args[i],
-                         &seq->period[i].color, &morph, &duration) < 3) {
+    if (ParseColorSpec(args[i], &seq->period[i].color, &morph, &duration) < 3) {
       return false;
     }
     morph = (morph + 249) / 250;
@@ -132,7 +132,7 @@ static bool parse_sequence(const char *const *args, int color_num,
 
 // Parse an aux value (such as 'on' or 'off' or '1' or '0') from the commandline
 // and stuff it in the aux_value result.
-static bool parse_aux_value(const char *arg, char *aux_value) {
+static bool ParseAuxValue(const char *arg, char *aux_value) {
   if (strcmp(arg, "on") == 0) {
     *aux_value = 1;
   } else if (strcmp(arg, "off") == 0) {
@@ -152,7 +152,7 @@ static bool parse_aux_value(const char *arg, char *aux_value) {
   return true;
 }
 
-static bool print_orb_color(MicroOrb *orb) {
+static bool PrintOrbColor(MicroOrb *orb) {
   struct orb_rgb_t color;
   if (!orb->GetColor(&color))
     return false;
@@ -160,7 +160,7 @@ static bool print_orb_color(MicroOrb *orb) {
   return true;
 }
 
-static void format_sequence(const struct orb_sequence_t *seq) {
+static void FormatSequence(const struct orb_sequence_t *seq) {
   int i;
   for (i = 0; i < seq->count; ++i) {
     const struct orb_color_period_t *period = &seq->period[i];
@@ -213,7 +213,7 @@ int main(int argc, char **argv) {
 
       case 'x':
         mode = SET_AUX;
-        if (!parse_aux_value(optarg, &aux_value))
+        if (!ParseAuxValue(optarg, &aux_value))
           return usage(argv[0]);
         break;
 
@@ -223,11 +223,11 @@ int main(int argc, char **argv) {
   }
 
   if (mode == LIST_DEVICES) {
-    return list_available_orb_serials() ? 0 : 1;
+    return ListAvailableOrbSerials() ? 0 : 1;
   }
 
   /* The other commands require to open the partiulcar orb */
-  MicroOrb *orb = open_orb(request_serial);
+  MicroOrb *orb = OpenOrb(request_serial);
   if (orb == NULL) {
     if (request_serial) {
       fprintf(stderr, "No orb with serial '%s' found.\n", request_serial);
@@ -238,18 +238,18 @@ int main(int argc, char **argv) {
   }
 
   if (mode == GET_COLOR) {
-    return print_orb_color(orb) ? 0 : 1;
+    return PrintOrbColor(orb) ? 0 : 1;
   } else if (mode == GET_SEQUENCE) {
     struct orb_sequence_t seq;
     if (!orb->GetSequence(&seq)) {
       return 1;
     }
-    format_sequence(&seq);
+    FormatSequence(&seq);
   } else if (mode == SET_AUX) {
     return orb->SetAux(aux_value) ? 0 : 1;
   } else {
     const int kArgOffset = optind;
-    
+
     // Number of colors we got.
     const int color_num = argc - kArgOffset;
 
@@ -258,9 +258,9 @@ int main(int argc, char **argv) {
     }
 
     struct orb_sequence_t seq;
-    if (!parse_sequence(argv + kArgOffset, color_num, &seq))
+    if (!ParseSequence(argv + kArgOffset, color_num, &seq))
       usage(argv[0]);
-    if (verbose) format_sequence(&seq);
+    if (verbose) FormatSequence(&seq);
     orb->SetSequence(seq);
   }
   delete orb;
