@@ -180,6 +180,7 @@ int main(int argc, char **argv) {
     GET_SEQUENCE,
     SET_AUX,
     LIST_DEVICES,
+    SET_INITIAL_SEQUENCE,
   } mode = SET_COLOR_SEQUENCE;
 
   int verbose = 0;
@@ -187,7 +188,7 @@ int main(int argc, char **argv) {
   char *request_serial = NULL;
 
   int opt;
-  while ((opt = getopt(argc, argv, "gGvhls:x:P:")) != -1) {
+  while ((opt = getopt(argc, argv, "gGvhlSs:x:P:")) != -1) {
     switch (opt) {
       case 'l':
         mode = LIST_DEVICES;
@@ -204,6 +205,10 @@ int main(int argc, char **argv) {
       case 's':
         request_serial = strdup(optarg);
         break;
+
+      case 'S':
+	mode = SET_INITIAL_SEQUENCE;
+	break;
 
       case 'h':
         usage(argv[0]);
@@ -227,7 +232,8 @@ int main(int argc, char **argv) {
   const int kArgOffset = optind;
   const int arg_num = argc - kArgOffset;
 
-  if (mode == SET_COLOR_SEQUENCE && arg_num == 0) {
+  if ((mode == SET_COLOR_SEQUENCE || mode == SET_INITIAL_SEQUENCE)
+      && arg_num == 0) {
       // No colors given, show help and list available orbs.
       usage(argv[0]);
       fprintf(stderr, "-- Connected orbs --\n");
@@ -269,7 +275,11 @@ int main(int argc, char **argv) {
     if (!ParseSequence(argv + kArgOffset, arg_num, &seq))
       usage(argv[0]);
     if (verbose) FormatSequence(&seq);
-    orb->SetSequence(seq);
+    if (mode == SET_COLOR_SEQUENCE) {
+      return orb->SetSequence(seq) ? 0 : 1;
+    } else if (mode == SET_INITIAL_SEQUENCE) {
+      return orb->SetInitialSequence(seq) ? 0 : 1;
+    }
   }
   delete orb;
   return 0;

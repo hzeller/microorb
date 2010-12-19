@@ -20,6 +20,7 @@ static const int kUsbRetries = 25;      // Retries in case of usb bus error.
 
 // Memory offset of the current limiting byte in the EEPROM of newer orbs.
 static const int kCurrentLimitEepromOffset = 16;
+static const int kInitialSequenceEepromOffset = 17;
 
 // The Vendor-ID is usually assigned by some central USB committee for
 // cash; We just use the free-to-use 'Prototype product Vendor ID'
@@ -245,5 +246,12 @@ bool MicroOrb::SwitchCurrentLimit(bool value) {
   if (value)
     to_send = ~to_send;
   return PokeEeprom(kCurrentLimitEepromOffset, &to_send, 1);
+}
+
+bool MicroOrb::SetInitialSequence(const struct orb_sequence_t &sequence) {
+  if (!IsOrb4()) return false;
+  const int data_len = (sizeof(sequence.count)
+                        + sequence.count * sizeof(struct orb_color_period_t));
+  return PokeEeprom(kInitialSequenceEepromOffset, &sequence, data_len);
 }
 }  // end namespace orb_driver

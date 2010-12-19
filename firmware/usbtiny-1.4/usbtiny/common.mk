@@ -20,7 +20,7 @@
 # ======================================================================
 
 CC	= avr-gcc
-CFLAGS	= -Os -g -Wall -I. -I$(USBTINY)
+CFLAGS	= -Os -g -Wall -I. -I$(USBTINY) -fno-split-wide-types
 ASFLAGS	= -Os -g -Wall -I.
 LDFLAGS	= -g
 MODULES = crc.o int.o usb.o $(OBJECTS)
