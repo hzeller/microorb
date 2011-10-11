@@ -1,14 +1,15 @@
 PROJECT=orb-4
 EAGLE_BIN=/opt/eagle-5.11.0/bin/eagle
 
-GERBER_FILES=fab/$(PROJECT)-sol-bot-copper.grb.sol \
-             fab/$(PROJECT)-sol-bot-stop.grb.sts \
-             fab/$(PROJECT)-sol-bot-silk.grb.pls \
-	     fab/$(PROJECT)-cmp-top-copper.grb.cmp \
-             fab/$(PROJECT)-cmp-top-stop.grb.stc \
-             fab/$(PROJECT)-cmp-top-silk.grb.plc \
-             fab/$(PROJECT)-documentation.grb
-EXCELLON_FILES=fab/$(PROJECT).drd
+FAB_DIR=fab-orb4
+GERBER_FILES=$(FAB_DIR)/$(PROJECT)-sol-bot-copper.grb.sol \
+             $(FAB_DIR)/$(PROJECT)-sol-bot-stop.grb.sts \
+             $(FAB_DIR)/$(PROJECT)-sol-bot-silk.grb.pls \
+	     $(FAB_DIR)/$(PROJECT)-cmp-top-copper.grb.cmp \
+             $(FAB_DIR)/$(PROJECT)-cmp-top-stop.grb.stc \
+             $(FAB_DIR)/$(PROJECT)-cmp-top-silk.grb.plc \
+             $(FAB_DIR)/$(PROJECT)-documentation.grb
+EXCELLON_FILES=$(FAB_DIR)/$(PROJECT).drd
 
 EPS_FILES=ps/$(PROJECT)-sol-bot-copper.eps \
 	  ps/$(PROJECT)-cmp-top-copper.eps \
@@ -58,10 +59,10 @@ clean :
 
 # remove files, that are not needed by Olimex
 fab-clean:
-	rm -f fab/*.dri fab/*.gpi
+	rm -f $(FAB_DIR)/*.dri $(FAB_DIR)/*.gpi
 
 prep :
-	mkdir -p fab ps
+	mkdir -p $(FAB_DIR) ps
 
 %.drd: $(PROJECT).brd
 	$(EXCELLON_CAM) -o$@ $(PROJECT).brd drills holes
