@@ -17,10 +17,10 @@
 // the callback functions usb_in() and usb_out() will be called for IN
 // and OUT transfers.
 //
-// Maximum stack usage (gcc 3.4.3 & 4.1.0) of usb_poll(): 5 bytes plus
+// Maximum stack usage (gcc 4.1.0 & 4.3.4) of usb_poll(): 5 bytes plus
 // possible additional stack usage in usb_setup(), usb_in() or usb_out().
 //
-// Copyright 2006-2008 Dick Streefland
+// Copyright 2006-2010 Dick Streefland
 //
 // This is free software, licensed under the terms of the GNU General
 // Public License as published by the Free Software Foundation.
@@ -231,6 +231,9 @@ static	void	usb_receive ( byte_t* data, byte_t rx_len )
 			else if	( data[1] == 5 )	// SET_ADDRESS
 			{
 				usb_new_address = data[2];
+#ifdef	USBTINY_USB_OK_LED
+				SET(USBTINY_USB_OK_LED);// LED on
+#endif
 			}
 			else if	( data[1] == 6 )	// GET_DESCRIPTOR
 			{
@@ -390,6 +393,13 @@ extern	void	usb_init ( void )
 {
 	USB_INT_CONFIG |= USB_INT_CONFIG_SET;
 	USB_INT_ENABLE |= (1 << USB_INT_ENABLE_BIT);
+#ifdef	USBTINY_USB_OK_LED
+	OUTPUT(USBTINY_USB_OK_LED);
+#endif
+#ifdef	USBTINY_DMINUS_PULLUP
+	SET(USBTINY_DMINUS_PULLUP);
+	OUTPUT(USBTINY_DMINUS_PULLUP);	// enable pullup on D-
+#endif
 	sei();
 }
 
@@ -423,5 +433,8 @@ extern	void	usb_poll ( void )
 	{	// SE0 for more than 2.5uS is a reset
 		usb_new_address = 0;
 		usb_address = 0;
+#ifdef	USBTINY_USB_OK_LED
+		CLR(USBTINY_USB_OK_LED);	// LED off
+#endif
 	}
 }

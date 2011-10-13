@@ -1,11 +1,15 @@
 PROJECT=orb-4
-GERBER_FILES=fab/$(PROJECT)-sol-bot-copper.grb.sol \
-             fab/$(PROJECT)-sol-bot-stop.grb.sts \
-             fab/$(PROJECT)-sol-bot-silk.grb.pls \
-	     fab/$(PROJECT)-cmp-top-copper.grb.cmp \
-             fab/$(PROJECT)-cmp-top-stop.grb.stc \
-             fab/$(PROJECT)-cmp-top-silk.grb.plc
-EXCELLON_FILES=fab/$(PROJECT).drd
+EAGLE_BIN=/opt/eagle-5.11.0/bin/eagle
+
+FAB_DIR=fab-orb4
+GERBER_FILES=$(FAB_DIR)/$(PROJECT)-sol-bot-copper.grb.sol \
+             $(FAB_DIR)/$(PROJECT)-sol-bot-stop.grb.sts \
+             $(FAB_DIR)/$(PROJECT)-sol-bot-silk.grb.pls \
+	     $(FAB_DIR)/$(PROJECT)-cmp-top-copper.grb.cmp \
+             $(FAB_DIR)/$(PROJECT)-cmp-top-stop.grb.stc \
+             $(FAB_DIR)/$(PROJECT)-cmp-top-silk.grb.plc \
+             $(FAB_DIR)/$(PROJECT)-documentation.grb
+EXCELLON_FILES=$(FAB_DIR)/$(PROJECT).drd
 
 EPS_FILES=ps/$(PROJECT)-sol-bot-copper.eps \
 	  ps/$(PROJECT)-cmp-top-copper.eps \
@@ -23,9 +27,9 @@ PDF_PANELS=ps/$(PROJECT)-sol-bot-copper.panel.pdf \
 	   ps/$(PROJECT)-sol-bot-silk.panel-mirror.pdf
 
 SCHEMATIC=ps/$(PROJECT)-schematic.pdf
-CHEAT_SHEET=ps/$(PROJECT)-cheat-sheet.pdf
+DOCUMENTATION_SHEET=ps/$(PROJECT)-documentation.pdf
 
-CAM_PROCESS=/opt/eagle-5.11.0/bin/eagle -N+ -c+ -X
+CAM_PROCESS=$(EAGLE_BIN) -N+ -c+ -X
 GERB_CAM=$(CAM_PROCESS) -dGERBER_RS274X
 EXCELLON_CAM=$(CAM_PROCESS) -dEXCELLON -E0.025
 EPS_CAM=$(CAM_PROCESS) -dEPS
@@ -46,18 +50,19 @@ all : gerber excellon fab-clean postscript
 
 excellon : prep $(EXCELLON_FILES)
 gerber : prep $(GERBER_FILES)
-postscript : prep $(EPS_FILES) $(SCHEMATIC) $(CHEAT_SHEET) $(PDF_PANELS)
+postscript : prep $(EPS_FILES) $(SCHEMATIC) $(DOCUMENTATION_SHEET) $(PDF_PANELS)
 
 clean :
 	rm -f $(GERBER_FILES) $(EXCELLON_FILES) \
-	      $(EPS_FILES) $(PS_PANELS) $(PDF_PANELS) 
+	      $(EPS_FILES) $(PS_PANELS) $(PDF_PANELS) \
+	      $(DOCUMENTATION_SHEET) $(SCHEMATIC)
 
 # remove files, that are not needed by Olimex
 fab-clean:
-	rm -f fab/*.dri fab/*.gpi
+	rm -f $(FAB_DIR)/*.dri $(FAB_DIR)/*.gpi
 
 prep :
-	mkdir -p fab ps
+	mkdir -p $(FAB_DIR) ps
 
 %.drd: $(PROJECT).brd
 	$(EXCELLON_CAM) -o$@ $(PROJECT).brd drills holes
@@ -97,11 +102,14 @@ prep :
 %-cmp-top-silk.grb.plc: $(PROJECT).brd
 	$(GERB_CAM) -o$@ $(PROJECT).brd $(GRB_CMP_MIRROR) dimension tplace tnames
 
+%-documentation.grb : $(PROJECT).brd
+	$(GERB_CAM) -o$@ $(PROJECT).brd dimension document tplace tDocu pad drills milling measures
+
 %-cmp-top-silk.eps: $(PROJECT).brd
 	$(EPS_CAM) -o$@ $(EPS_CMP_MIRROR) $(PROJECT).brd dimension tplace tnames
 
-%-cheat-sheet.eps: $(PROJECT).brd
-	$(EPS_CAM) -s 3 -o$@ $(PROJECT).brd dimension tplace tnames tDocu pad
+%-documentation.eps: $(PROJECT).brd
+	$(EPS_CAM) -s 3 -r+ -o$@ $(PROJECT).brd dimension document tplace tDocu pad drill milling measures
 
 # Its easier to center the manual drill if the holes are small.
 %.smallhole-eps : %.eps

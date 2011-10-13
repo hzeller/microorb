@@ -283,7 +283,8 @@ uchar tx_sequence_count;
 // Data_left must be able to hold the size of a sequence.
 COMPILE_ASSERT(sizeof(struct orb_sequence_t) <= 255);
 
-extern void usb_out( byte_t *data, byte_t len) {
+// Handle incoming data from USB.
+extern void usb_out(byte_t *data, byte_t len) {
     switch (input_mode) {
     case SET_SEQUENCE: {
         if (txbuf.data_left == 0) {  // new start.
@@ -331,7 +332,8 @@ extern void usb_out( byte_t *data, byte_t len) {
     }
 }
 
-extern byte_t usb_in( byte_t *data, byte_t len ) {
+// Return data back to host.
+extern byte_t usb_in(byte_t *data, byte_t len) {
     byte_t retval = 0;
     switch (input_mode) {
     case GET_SEQUENCE: {
