@@ -25,7 +25,7 @@ PDF_PANELS=ps/$(PROJECT)-sol-bot-copper.panel.pdf \
 SCHEMATIC=ps/$(PROJECT)-schematic.pdf
 CHEAT_SHEET=ps/$(PROJECT)-cheat-sheet.pdf
 
-CAM_PROCESS=/opt/eagle-5.10.0/bin/eagle -N+ -c+ -X
+CAM_PROCESS=/opt/eagle-5.11.0/bin/eagle -N+ -c+ -X
 GERB_CAM=$(CAM_PROCESS) -dGERBER_RS274X
 EXCELLON_CAM=$(CAM_PROCESS) -dEXCELLON -E0.025
 EPS_CAM=$(CAM_PROCESS) -dEPS
