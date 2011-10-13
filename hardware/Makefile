@@ -1,7 +1,7 @@
 PROJECT=orb-4
 EAGLE_BIN=/opt/eagle-5.11.0/bin/eagle
 
-FAB_DIR=fab-orb4
+FAB_DIR=$(PROJECT)-fab
 GERBER_FILES=$(FAB_DIR)/$(PROJECT)-sol-bot-copper.grb.sol \
              $(FAB_DIR)/$(PROJECT)-sol-bot-stop.grb.sts \
              $(FAB_DIR)/$(PROJECT)-sol-bot-silk.grb.pls \
