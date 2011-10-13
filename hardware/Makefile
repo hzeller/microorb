@@ -2,6 +2,8 @@ PROJECT=orb-4
 EAGLE_BIN=/opt/eagle-5.11.0/bin/eagle
 
 FAB_DIR=$(PROJECT)-fab
+PRINT_DIR=ps
+
 GERBER_FILES=$(FAB_DIR)/$(PROJECT)-sol-bot-copper.grb.sol \
              $(FAB_DIR)/$(PROJECT)-sol-bot-stop.grb.sts \
              $(FAB_DIR)/$(PROJECT)-sol-bot-silk.grb.pls \
@@ -11,23 +13,23 @@ GERBER_FILES=$(FAB_DIR)/$(PROJECT)-sol-bot-copper.grb.sol \
              $(FAB_DIR)/$(PROJECT)-documentation.grb
 EXCELLON_FILES=$(FAB_DIR)/$(PROJECT).drd
 
-EPS_FILES=ps/$(PROJECT)-sol-bot-copper.eps \
-	  ps/$(PROJECT)-cmp-top-copper.eps \
-          ps/$(PROJECT)-cmp-top-silk.eps \
-          ps/$(PROJECT)-sol-bot-silk.eps
-PS_PANELS=ps/$(PROJECT)-sol-bot-copper.panel.ps \
-	  ps/$(PROJECT)-cmp-top-copper.panel.ps \
-	  ps/$(PROJECT)-cmp-top-silk.panel.ps \
-	  ps/$(PROJECT)-cmp-top-silk.panel-mirror.ps
-PDF_PANELS=ps/$(PROJECT)-sol-bot-copper.panel.pdf \
-	   ps/$(PROJECT)-cmp-top-copper.panel.pdf \
-	   ps/$(PROJECT)-cmp-top-silk.panel.pdf \
-	   ps/$(PROJECT)-cmp-top-silk.panel-mirror.pdf \
-	   ps/$(PROJECT)-sol-bot-silk.panel.pdf \
-	   ps/$(PROJECT)-sol-bot-silk.panel-mirror.pdf
+EPS_FILES=$(PRINT_DIR)/$(PROJECT)-sol-bot-copper.eps \
+	  $(PRINT_DIR)/$(PROJECT)-cmp-top-copper.eps \
+          $(PRINT_DIR)/$(PROJECT)-cmp-top-silk.eps \
+          $(PRINT_DIR)/$(PROJECT)-sol-bot-silk.eps
+PS_PANELS=$(PRINT_DIR)/$(PROJECT)-sol-bot-copper.panel.ps \
+	  $(PRINT_DIR)/$(PROJECT)-cmp-top-copper.panel.ps \
+	  $(PRINT_DIR)/$(PROJECT)-cmp-top-silk.panel.ps \
+	  $(PRINT_DIR)/$(PROJECT)-cmp-top-silk.panel-mirror.ps
+PDF_PANELS=$(PRINT_DIR)/$(PROJECT)-sol-bot-copper.panel.pdf \
+	   $(PRINT_DIR)/$(PROJECT)-cmp-top-copper.panel.pdf \
+	   $(PRINT_DIR)/$(PROJECT)-cmp-top-silk.panel.pdf \
+	   $(PRINT_DIR)/$(PROJECT)-cmp-top-silk.panel-mirror.pdf \
+	   $(PRINT_DIR)/$(PROJECT)-sol-bot-silk.panel.pdf \
+	   $(PRINT_DIR)/$(PROJECT)-sol-bot-silk.panel-mirror.pdf
 
-SCHEMATIC=ps/$(PROJECT)-schematic.pdf
-DOCUMENTATION_SHEET=ps/$(PROJECT)-documentation.pdf
+SCHEMATIC=$(PRINT_DIR)/$(PROJECT)-schematic.pdf
+DOCUMENTATION_SHEET=$(PRINT_DIR)/$(PROJECT)-documentation.pdf
 
 CAM_PROCESS=$(EAGLE_BIN) -N+ -c+ -X
 GERB_CAM=$(CAM_PROCESS) -dGERBER_RS274X
@@ -56,6 +58,7 @@ clean :
 	rm -f $(GERBER_FILES) $(EXCELLON_FILES) \
 	      $(EPS_FILES) $(PS_PANELS) $(PDF_PANELS) \
 	      $(DOCUMENTATION_SHEET) $(SCHEMATIC)
+	rmdir $(FAB_DIR) $(PRINT_DIR)
 
 # remove files, that are not needed by Olimex
 fab-clean:
