@@ -26,8 +26,9 @@
 // Public License as published by the Free Software Foundation.
 // ======================================================================
 
-#include <avr/pgmspace.h>
+#include <avr/eeprom.h>
 #include <avr/interrupt.h>
+#include <avr/pgmspace.h>
 #include "def.h"
 #include "usb.h"
 
@@ -70,6 +71,7 @@ enum
 	TX_STATE_IDLE = 0,		// transmitter idle
 	TX_STATE_RAM,			// usb_tx_data is a RAM address
 	TX_STATE_ROM,			// usb_tx_data is a ROM address
+	TX_STATE_EEPROM,		// usb_tx_data is a EEPROM address
 	TX_STATE_CALLBACK,		// call usb_in() to obtain transmit data
 };
 
@@ -117,8 +119,13 @@ struct
 	byte_t	length;
 	byte_t	type;
 	int	string[sizeof(USBTINY_SERIAL)-1];
-}	string_serial PROGMEM =
-{
+}	string_serial
+#ifdef USB_EEPROM_SERIAL
+ EEMEM
+#else
+ PROGMEM
+#endif
+= {
 	2 * sizeof(USBTINY_SERIAL),
 	DESCRIPTOR_TYPE_STRING,
 	{ CAT2(L, USBTINY_SERIAL) }
@@ -266,6 +273,9 @@ static	void	usb_receive ( byte_t* data, byte_t rx_len )
 #if	SERIAL_ID
 					else if ( data[2] == SERIAL_ID )
 					{
+#ifdef USB_EEPROM_SERIAL
+                                                usb_tx_state = TX_STATE_EEPROM;
+#endif
 						data = (byte_t*) &string_serial;
 						len = sizeof(string_serial);
 					}
@@ -344,6 +354,15 @@ static	void	usb_transmit ( void )
 				for	( i = 0; i < len; i++ )
 				{
 					*dst++ = *src++;
+				}
+			}
+			else if	( usb_tx_state == TX_STATE_EEPROM )
+			{
+				for	( i = 0; i < len; i++ )
+				{
+					b = eeprom_read_byte( src );
+					src++;
+					*dst++ = b;
 				}
 			}
 			else	// usb_tx_state == TX_STATE_ROM

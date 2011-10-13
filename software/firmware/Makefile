@@ -1,7 +1,7 @@
 # orb makefile <h.zeller@acm.org>
 ##
 
-USBTINY=usbtiny-1.4/usbtiny
+USBTINY=usbtiny-1.6/usbtiny
 
 TARGET_ARCH = -mmcu=attiny44
 AVRDUDE     = avrdude -p t44 -c avrusb500
