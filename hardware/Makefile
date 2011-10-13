@@ -58,7 +58,8 @@ clean :
 	rm -f $(GERBER_FILES) $(EXCELLON_FILES) \
 	      $(EPS_FILES) $(PS_PANELS) $(PDF_PANELS) \
 	      $(DOCUMENTATION_SHEET) $(SCHEMATIC)
-	rmdir $(FAB_DIR) $(PRINT_DIR)
+	if [ -e $(FAB_DIR) ] ; then rmdir $(FAB_DIR); fi
+	if [ -e $(PRINT_DIR) ] ; then rmdir $(PRINT_DIR); fi
 
 # remove files, that are not needed by Olimex
 fab-clean:
