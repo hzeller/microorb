@@ -10,7 +10,7 @@ GERBER_FILES=$(FAB_DIR)/$(PROJECT)-sol-bot-copper.grb.sol \
 	     $(FAB_DIR)/$(PROJECT)-cmp-top-copper.grb.cmp \
              $(FAB_DIR)/$(PROJECT)-cmp-top-stop.grb.stc \
              $(FAB_DIR)/$(PROJECT)-cmp-top-silk.grb.plc \
-             $(FAB_DIR)/$(PROJECT)-documentation.grb
+             $(FAB_DIR)/$(PROJECT)-fab-doc.grb
 EXCELLON_FILES=$(FAB_DIR)/$(PROJECT).drd
 
 EPS_FILES=$(PRINT_DIR)/$(PROJECT)-sol-bot-copper.eps \
@@ -29,7 +29,8 @@ PDF_PANELS=$(PRINT_DIR)/$(PROJECT)-sol-bot-copper.panel.pdf \
 	   $(PRINT_DIR)/$(PROJECT)-sol-bot-silk.panel-mirror.pdf
 
 SCHEMATIC=$(PRINT_DIR)/$(PROJECT)-schematic.pdf
-DOCUMENTATION_SHEET=$(PRINT_DIR)/$(PROJECT)-documentation.pdf
+FAB_DOC=$(PRINT_DIR)/$(PROJECT)-fab-doc.pdf
+ASM_DOC=$(PRINT_DIR)/$(PROJECT)-assembly-doc.pdf
 
 CAM_PROCESS=$(EAGLE_BIN) -N+ -c+ -X
 GERB_CAM=$(CAM_PROCESS) -dGERBER_RS274X
@@ -52,12 +53,12 @@ all : gerber excellon fab-clean postscript
 
 excellon : prep $(EXCELLON_FILES)
 gerber : prep $(GERBER_FILES)
-postscript : prep $(EPS_FILES) $(SCHEMATIC) $(DOCUMENTATION_SHEET) $(PDF_PANELS)
+postscript : prep $(EPS_FILES) $(SCHEMATIC) $(FAB_DOC) $(ASM_DOC) $(PDF_PANELS)
 
 clean :
 	rm -f $(GERBER_FILES) $(EXCELLON_FILES) \
 	      $(EPS_FILES) $(PS_PANELS) $(PDF_PANELS) \
-	      $(DOCUMENTATION_SHEET) $(SCHEMATIC)
+	      $(FAB_DOC) $(ASM_DOC) $(SCHEMATIC)
 	if [ -e $(FAB_DIR) ] ; then rmdir $(FAB_DIR); fi
 	if [ -e $(PRINT_DIR) ] ; then rmdir $(PRINT_DIR); fi
 
@@ -106,14 +107,17 @@ prep :
 %-cmp-top-silk.grb.plc: $(PROJECT).brd
 	$(GERB_CAM) -o$@ $(PROJECT).brd $(GRB_CMP_MIRROR) dimension tplace tnames
 
-%-documentation.grb : $(PROJECT).brd
+%-fab-doc.grb : $(PROJECT).brd
 	$(GERB_CAM) -o$@ $(PROJECT).brd dimension document tplace tDocu pad drills milling measures
 
 %-cmp-top-silk.eps: $(PROJECT).brd
 	$(EPS_CAM) -o$@ $(EPS_CMP_MIRROR) $(PROJECT).brd dimension tplace tnames
 
-%-documentation.eps: $(PROJECT).brd
+%-fab-doc.eps: $(PROJECT).brd
 	$(EPS_CAM) -s 3 -r+ -o$@ $(PROJECT).brd dimension document tplace tDocu pad drill milling measures
+
+%-assembly-doc.eps: $(PROJECT).brd
+	$(EPS_CAM) -s 5 -r+ -o$@ $(PROJECT).brd dimension tplace tDocu tOrigins tNames Pads
 
 # Its easier to center the manual drill if the holes are small.
 %.smallhole-eps : %.eps
