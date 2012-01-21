@@ -1,0 +1,13 @@
+This directory contains the binary to talk to the microorb as well as testing
+binary to do a quick check after assembly and assign an initial serial number.
+
+ microorb      -     The binary to talk to the microorb
+ factory-test  -     Binary used for initial test/serial burning.
+
+In order to talk to the Orb, you need permissions on that device.
+On Linux, you'd add a file in /etc/udev/rules.d/51-microorb.rules that
+gives the USB device with 6666:f00d read/write permissions for everyone:
+
+----8<-- /etc/udev/rules.d/51-microorb.rules ----
+SUBSYSTEM=="usb", ENV{ID_VENDOR_ID}=="6666", ENV{ID_MODEL_ID}=="f00d", MODE="666"
+-------------------------------------------------
