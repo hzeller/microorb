@@ -1,4 +1,5 @@
-This contains the usbtiny-1.4 distribution with some
+This contains the usbtiny-1.6 distribution with some
 modification to usbtiny/usb.c to allow reading the serial
 number from eeprom.
-The ir/ and spi/ projects are removed for space reasons.
+We just use the plain usbtiny library; the ir/ and spi/ projects are not
+needed removed for space reasons.

@@ -37,6 +37,35 @@ static const char* ok_banner[] = {
   "      ####   #    #"
 };
 
+// For human consumption, this should not be too bright.
+static const int kRGBTestBrightness = 0x0f;
+
+// Size of sequence to set for sequence set/get test. Since there seem to
+// be trouble with the USB synchronization sometimes, we don't go the full
+// length of 16 but a bit shorter.
+static const int kColorSequenceLength = 16;
+
+// A Light-sensor to determine if the LED is doing what we expect.
+class LightSensor {
+public:
+  virtual ~LightSensor() {}
+  virtual bool IsBright() = 0;
+  virtual bool IsDark() = 0;
+};
+
+// This dummy light sensor always returns what we expect. TODO: build real
+// external sensor.
+class DummyLightSensor : public LightSensor {
+public:
+  virtual bool IsBright() {
+    usleep(kHumanObservationTime * 1000); // slow down things.
+    return true;
+  }
+  virtual bool IsDark() { return true; }
+private:
+  static const int kHumanObservationTime = 500; /* ms */
+};
+
 class PersistentSerialGenerator {
 public:
   PersistentSerialGenerator(const string& filename,
@@ -140,7 +169,7 @@ bool SetAndReadTestSequence(MicroOrb* orb, int column) {
   memset(&test_sequence, 0, sizeof(test_sequence));
 
   // This USB implementation is a bit flaky. Send a smaller sequence.
-  test_sequence.count = ORB_MAX_SEQUENCE / 4;
+  test_sequence.count = kColorSequenceLength;
   for (unsigned char i = 0; i < test_sequence.count; ++i) {
     test_sequence.period[i].morph_time = i;
     test_sequence.period[i].hold_time = 2 * i + ORB_MAX_SEQUENCE;
@@ -190,21 +219,13 @@ void DisplaySuccessMessage(bool success, int column) {
   refresh();
 }
 
-// TODO: implement external photo-sensor.
-bool IsDark() {
-  return true;
-}
-bool IsBright() {
-  return true;
-}
-
 bool SetColorAndSettle(MicroOrb *orb, const orb_rgb_t& color) {
   if (!orb->SetColor(color)) {
     return false;
   }
   orb_rgb_t compare_color;
   for (int i = 0; i < 5; ++i) {
-    usleep(200 * 1000);  // let things settle.
+    usleep(50 * 1000);  // let things settle.
     orb->GetColor(&compare_color);
     if (memcmp(&color, &compare_color, sizeof(color)) == 0)
       break;
@@ -214,22 +235,23 @@ bool SetColorAndSettle(MicroOrb *orb, const orb_rgb_t& color) {
   return true;
 }
 
-bool TestSingleColor(MicroOrb *orb, const orb_rgb_t& color, int column) {
+bool TestSingleColor(MicroOrb *orb, LightSensor *light_sensor,
+                     const orb_rgb_t& color, int column) {
   static const orb_rgb_t orb_black = { 0, 0, 0 };
   int y, dummy;
   getyx(stdscr, y, dummy);
-  mvprintw(y, column, "- LED color r=%02X g=%02X b=%02X",
+  mvprintw(y, column, "- LED color [%02x %02x %02x]",
            color.red, color.green, color.blue);
   if (!SetColorAndSettle(orb, color)) {
     printw(" setting:FAIL\n");
     return false;
   }
-  if (!IsBright()) {
+  if (!light_sensor->IsBright()) {
     printw(" seeing:FAIL\n");
     return false;
   }
   SetColorAndSettle(orb, orb_black);
-  if (!IsDark()) {
+  if (!light_sensor->IsDark()) {
     printw(" set-back-to-black:FAIL\n");
     return false;
   }
@@ -238,19 +260,19 @@ bool TestSingleColor(MicroOrb *orb, const orb_rgb_t& color, int column) {
   return true;
 }
 
-bool TestRGBColors(MicroOrb *orb, int column) {
+bool TestRGBColors(MicroOrb *orb, LightSensor *light_sensor, int column) {
   int y, dummy;
   getyx(stdscr, y, dummy);
   mvprintw(y, column, "* Testing basic RGB function.\n");
   bool success = true;
-  const orb_rgb_t red = { 0xff, 0, 0 };
-  success &= TestSingleColor(orb, red, column + 2);
+  const orb_rgb_t red = { kRGBTestBrightness, 0, 0 };
+  success &= TestSingleColor(orb, light_sensor, red, column + 2);
 
-  const orb_rgb_t green = { 0, 0xff, 0};
-  success &= TestSingleColor(orb, green, column + 2);
+  const orb_rgb_t green = { 0, kRGBTestBrightness, 0 };
+  success &= TestSingleColor(orb, light_sensor, green, column + 2);
 
-  const orb_rgb_t blue = { 0, 0, 0xff};
-  success &= TestSingleColor(orb, blue, column + 2);
+  const orb_rgb_t blue = { 0, 0, kRGBTestBrightness };
+  success &= TestSingleColor(orb, light_sensor, blue, column + 2);
 
   return success;
 }
@@ -277,6 +299,7 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
   bool force_serial = false;
 
   const int print_column = 16;
+  DummyLightSensor manual_light_sensor;
 
   for (;;) {
     erase();
@@ -305,7 +328,8 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
     refresh();
 
     if (success) success &= SetAndReadTestSequence(orb, print_column);
-    if (success) success &= TestRGBColors(orb, print_column);
+    if (success) success &= TestRGBColors(orb, &manual_light_sensor,
+                                          print_column);
     if (success) success &= WriteSerial(orb, force_serial, print_column,
                                         generator);
 
