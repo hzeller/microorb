@@ -35,6 +35,11 @@ class MicroOrb {
   // is possible to address a specific one if multiple are connected.
   const std::string& GetSerial();
 
+  // Set the serial number with exactly 7 characters and store in Orb.
+  // Returns the success of writing the serial number to EEPROM.
+  // Only for Orb versions > 4
+  bool SetSerial(const std::string& serial);
+
   // Get capabilities.
   bool GetCapabilities(struct orb_capabilities_t *capabilities);
 

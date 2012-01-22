@@ -19,6 +19,7 @@ static const int kUsbTimeoutMs = 1500;
 static const int kUsbRetries = 25;      // Retries in case of usb bus error.
 
 // Memory offset of the current limiting byte in the EEPROM of newer orbs.
+static const int kSerialNumberEepromOffset = 2;
 static const int kCurrentLimitEepromOffset = 16;
 static const int kInitialSequenceEepromOffset = 17;
 
@@ -108,6 +109,20 @@ const std::string& MicroOrb::GetSerial() {
     serial_ = device_serial;
   }
   return serial_;
+}
+
+bool MicroOrb::SetSerial(const std::string& serial) {
+  if (!IsOrb4()) return false;
+  if (serial.length() != 7) return false;
+
+  // The serial number is stored as UTF16. Manually blow that up :)
+  std::string utf16_serial;
+  for (unsigned int i = 0; i < serial.size(); ++i) {
+    utf16_serial.append(1, serial[i]);
+    utf16_serial.append(1, '\0');
+  }
+  return PokeEeprom(kSerialNumberEepromOffset,
+                    utf16_serial.data(), utf16_serial.size());
 }
 
 static void AddCommaString(const std::string& msg, std::string *out) {
