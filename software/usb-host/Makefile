@@ -7,7 +7,7 @@ microorb : main.o microorb.o
 	$(CXX) $^ -o $@ -lusb
 
 factory-test : factory-test.cc microorb.o
-	$(CXX) $^ -o $@ -lusb
+	$(CXX) $^ -o $@ -lusb -lncurses
 
 clean:
-	rm -f microorb main.o microorb.o
+	rm -f microorb main.o microorb.o factory-test.o
