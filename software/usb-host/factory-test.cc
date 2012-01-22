@@ -74,8 +74,9 @@ private:
       int number;
       if (2 == fscanf(file, "%s %d", prefix, &number)) {
         if (prefix_ != prefix) {
-          fprintf(stderr, "WARNING, prefix in file '%s' overrides '%s'\n",
-                  prefix, prefix_.c_str());
+          fprintf(stderr, "Prefix in file '%s' mismatches '%s' on commandline. "
+                  "Plese fix.\n", prefix, prefix_.c_str());
+          exit(1);
         }
         prefix_ = prefix;
 	current_serial_ = number;
@@ -272,8 +273,7 @@ bool WriteSerial(MicroOrb *orb, bool force, int column,
   return success;
 }
 
-void RunTestLoop(const string &filename, const string &commandline_prefix) {
-  PersistentSerialGenerator generator(filename, commandline_prefix);
+void RunTestLoop(PersistentSerialGenerator *generator) {
   bool force_serial = false;
 
   const int print_column = 16;
@@ -307,7 +307,7 @@ void RunTestLoop(const string &filename, const string &commandline_prefix) {
     if (success) success &= SetAndReadTestSequence(orb, print_column);
     if (success) success &= TestRGBColors(orb, print_column);
     if (success) success &= WriteSerial(orb, force_serial, print_column,
-                                        &generator);
+                                        generator);
 
     DisplaySuccessMessage(success, print_column);
     WaitForOrbDisconnect();
@@ -319,9 +319,13 @@ int main(int argc, char **argv) {
     fprintf(stderr, "Usage: %s <filename> <serial-prefix>\n", argv[0]);
     return 1;
   }
+  const string filename = argv[1];
+  const string commandline_prefix = argv[2];
+  PersistentSerialGenerator generator(filename, commandline_prefix);
+
   initscr();
   start_color();
-  RunTestLoop(argv[1], argv[2]);
+  RunTestLoop(&generator);
   endwin();
   return 0;
 }
