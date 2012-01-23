@@ -41,7 +41,7 @@
 
 // The following optional macros may be used as an identification of
 // your device. Undefine them when you run out of flash space.
-#define USBTINY_VENDOR_NAME  "Henner Zeller <h.zeller@acm.org>"
+#define USBTINY_VENDOR_NAME  "Henner Z. <h.zeller@acm.org>"
 #define USBTINY_DEVICE_NAME  "Microorb"
 #define USBTINY_SERIAL       "0000000"
 

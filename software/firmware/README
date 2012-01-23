@@ -1,0 +1,5 @@
+In order to compile, you need the avr compile environment and the avrdude
+tool to flash it to the orb:
+
+  $ sudo apt-get install gcc-avr avr-libc avrdude
+
