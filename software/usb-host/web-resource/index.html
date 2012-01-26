@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width; initial-scale = 1.0; maximum-scale=1.0; user-scalable=no" />
+<title>Orb Color</title>
+<script type="text/javascript" src="colorPicker.js"></script>
+</head>
+<body>
+<input class="color" type="text" style="width:410px;"/>
+<script>
+var inputTags = document.getElementsByTagName('input');
+var last_color = "000000";
+
+for (var n=inputTags.length;n--;) {
+  if (inputTags[n].className && inputTags[n].className.indexOf('color') > -1) {
+        inputTags[n].onclick = function(e) {
+           e = e || window.event;
+           colorPicker(e, 'B', 4, false, false, false);
+           colorPicker.cP.style.zIndex = 1;
+           colorPicker.exportColor = function() {
+              var c = colorPicker.CP.hex;
+              if (c != last_color) {
+                r = new XMLHttpRequest();
+                r.open("GET", "/set?c=" + c, true);
+                r.send(null);
+                last_color = c;
+              }
+           }
+        }
+  }
+}
+</script>
+
+</body>
+</html>

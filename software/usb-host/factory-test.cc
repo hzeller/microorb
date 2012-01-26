@@ -43,7 +43,7 @@ static const int kRGBTestBrightness = 0x0f;
 // Size of sequence to set for sequence set/get test. Since there seem to
 // be trouble with the USB synchronization sometimes, we don't go the full
 // length of 16 but a bit shorter.
-static const int kColorSequenceLength = 4;
+static const int kColorSequenceLength = 16;
 
 // A Light-sensor to determine if the LED is doing what we expect.
 class LightSensor {

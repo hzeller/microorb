@@ -4,7 +4,7 @@ CXXFLAGS=-Wall
 all : microorb factory-test
 
 microorb : main.o microorb.o
-	$(CXX) $^ -o $@ -lusb
+	$(CXX) $^ -o $@ -lusb -lmicrohttpd
 
 factory-test : factory-test.cc microorb.o
 	$(CXX) $^ -o $@ -lusb -lncurses

@@ -9,10 +9,26 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+
+#include <map>
+#include <string>
+
+#include <sys/types.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+typedef unsigned long long uint64_t;
+#include <microhttpd.h>
 
 #include "microorb.h"
 
 using orb_driver::MicroOrb;
+using std::string;
+using std::map;
 
 static int usage(const char *prog) {
   fprintf(stderr,
@@ -174,6 +190,83 @@ static void FormatSequence(const struct orb_sequence_t *seq) {
   fprintf(stderr, "\n");
 }
 
+int AcceptColorParam (void *cls, enum MHD_ValueKind kind, 
+                      const char *key, const char *value)
+{
+  if (strcmp(key, "c") == 0) {
+    string* ret_value = (string*) cls;
+    *ret_value = value;
+  }
+  return MHD_YES;
+}
+
+bool GetResource(const string &name, int *size, const char **data) {
+  typedef map<string, string*> ResourceMap;
+  static ResourceMap resources;
+  string resource_name = (name == "/") ? "/index.html" : name;
+  ResourceMap::const_iterator found = resources.find(resource_name);
+  string *result;
+  if (found != resources.end()) {
+    result = found->second;
+  } else {
+    const int fd = open(("web-resource/" + resource_name).c_str(), O_RDONLY);
+    if (fd < 0) return false;
+    result = new string();
+    char buffer[8192];
+    int r;
+    while ((r = read(fd, buffer, sizeof(buffer))) > 0) {
+      result->append(buffer, r);
+    }
+    close(fd);
+    resources[resource_name] = result;
+  }
+
+  *data = result->data();
+  *size = result->length();
+  return true;
+}
+
+int HandleHttp(void* cls, struct MHD_Connection *connection,
+               const char *url, const char *method, const char *version,
+               const char *upload_data, size_t *upload_size, void**) {
+  string result;
+  struct MHD_Response *response;
+  int ret;
+  if (strcmp(url, "/set") == 0) {
+    string color = "000000";
+    MHD_get_connection_values (connection, MHD_GET_ARGUMENT_KIND,
+                               &AcceptColorParam, &color);
+    struct orb_sequence_t seq;
+    const char *args[1];
+    args[0] = color.c_str();
+    if (!ParseSequence(args, 1, &seq)) {
+      response = MHD_create_response_from_data(4, (void*)"FAIL",
+                                               MHD_NO, MHD_NO);
+      ret = MHD_queue_response(connection, MHD_HTTP_BAD_REQUEST, response);
+    } else {
+      MicroOrb *orb = (MicroOrb*) cls;
+      orb->SetSequence(seq);
+      response = MHD_create_response_from_data(2, (void*)"OK",
+                                               MHD_NO, MHD_NO);
+      ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+    }
+  }
+  else {
+    int size;
+    const char *buffer;
+    if (GetResource(url, &size, &buffer)) {
+      response = MHD_create_response_from_data(size, (void*) buffer,
+                                               MHD_NO, MHD_NO);
+      ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+    } else {
+      response = MHD_create_response_from_data(0, (void*)"", MHD_NO, MHD_NO);
+      ret = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, NULL);
+    }
+  }
+  MHD_destroy_response(response);
+  return ret;
+}
+
 int main(int argc, char **argv) {
   enum Mode {
     SET_COLOR_SEQUENCE,
@@ -182,12 +275,13 @@ int main(int argc, char **argv) {
     SET_AUX,
     LIST_DEVICES,
     SET_INITIAL_SEQUENCE,
+    HTTP_SERVICE,
   } mode = SET_COLOR_SEQUENCE;
 
   int verbose = 0;
   char aux_value = 0;
   char *request_serial = NULL;
-
+  int port = -1;
   int opt;
   while ((opt = getopt(argc, argv, "gGvhlSs:x:P:")) != -1) {
     switch (opt) {
@@ -225,6 +319,11 @@ int main(int argc, char **argv) {
           return usage(argv[0]);
         break;
 
+      case 'P':
+        mode = HTTP_SERVICE;
+        port = atoi(optarg);
+        break;
+
       default:
         return usage(argv[0]);
     }
@@ -255,6 +354,16 @@ int main(int argc, char **argv) {
       fprintf(stderr, "No orb found.\n");
     }
     return 1;
+  }
+
+  if (port > 0 && mode == HTTP_SERVICE) {
+    struct MHD_Daemon *daemon;
+    daemon = MHD_start_daemon (MHD_USE_SELECT_INTERNALLY, port, NULL, NULL, 
+                               &HandleHttp, orb, MHD_OPTION_END);
+    if (NULL == daemon) return 1;
+    for (;;) getchar();
+    MHD_stop_daemon(daemon);
+    return 0;
   }
 
   if (mode == GET_COLOR) {
