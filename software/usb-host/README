@@ -2,7 +2,7 @@ This directory contains the binary to talk to the microorb as well as testing
 binary to do a quick check after assembly and assign an initial serial number.
 
 To compile, you need libusb and libncurses
- $ sudo apt-get install libusb-dev libncurses-dev libpion-net-dev libasio-dev liblog4cpp5-dev libboost-system-dev
+ $ sudo apt-get install libusb-dev libncurses-dev libmicrohttpd-dev
 
 The binaries produced are:
  microorb      -     The binary to talk to the microorb. That is what you need.
