@@ -27,6 +27,9 @@ eeprom.hex: main.elf
 eeprom-flash: eeprom.hex
 	$(AVRDUDE) -U eeprom:w:eeprom.hex
 
+print_fuse:
+	$(AVRDUDE) -q -q -U hfuse:r:-:h -U lfuse:r:-:h
+
 # (attiny 2313 page 163ff)
 ### Fuse high byte: 0xDB
 # 7 dwen	1    debug wire: yes.
@@ -73,6 +76,7 @@ fuse_2313:
 # 3 cksel3	1\
 # 2 cksel2	1 + crystal/oscillator >=8 Mhz  (page 26)
 # 1 cksel1	1/
-# 0 cksel0	0 ceramic resonator SUT 10 -> crystal oscillator, BOD enabled.
+# 0 cksel0	0 ceramic resonator SUT 10 -> resonator, BOD enabled.
 fuse_44:
 	$(AVRDUDE) -U hfuse:w:0xdd:m -U lfuse:w:0xee:m
+
