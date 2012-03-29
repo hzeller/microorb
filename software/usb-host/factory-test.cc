@@ -15,6 +15,11 @@
 
 #define STATE_FILE "state.txt"
 
+// Size of sequence to set for sequence set/get test. Since there seem to
+// be trouble with the USB synchronization sometimes, we don't go the full
+// length of 16 but a bit shorter.
+static const int kColorSequenceLength = 16;
+
 static const int kSerialNumberLen = 7;
 
 using std::string;
@@ -39,11 +44,6 @@ static const char* ok_banner[] = {
 
 // For human consumption, this should not be too bright.
 static const int kRGBTestBrightness = 0x0f;
-
-// Size of sequence to set for sequence set/get test. Since there seem to
-// be trouble with the USB synchronization sometimes, we don't go the full
-// length of 16 but a bit shorter.
-static const int kColorSequenceLength = 16;
 
 // A Light-sensor to determine if the LED is doing what we expect.
 class LightSensor {
