@@ -21,6 +21,7 @@
 static const int kColorSequenceLength = 16;
 
 static const int kSerialNumberLen = 7;
+static const int kMinSerialNumberDigits = 3;
 
 using std::string;
 
@@ -72,6 +73,11 @@ public:
                             const string& prefix)
     : filename_(filename), prefix_(prefix),
       current_serial_(0) {
+    if (prefix.length() >= kSerialNumberLen) {
+      fprintf(stderr, "Prefix too long: '%s' longer than max serial len %d\n",
+	      prefix.c_str(), kSerialNumberLen);
+      exit(1);
+    }
     Init();
     Store();
   }
@@ -80,7 +86,7 @@ public:
 
   string GenerateNextNumber() {
     char buffer[kSerialNumberLen + 1];
-    sprintf(buffer, "%s%0*d", prefix_.c_str(), number_len_, current_serial_);
+    sprintf(buffer, "%s%0*d", prefix_.c_str(), serial_digits_, current_serial_);
     current_serial_ = (current_serial_ + 1) % max_serial_;
     return buffer;
   }
@@ -100,13 +106,15 @@ private:
     FILE* file = fopen(filename_.c_str(), "r");
     if (file) {
       char prefix[kSerialNumberLen + 1];
-      int number;
+      int number = -1;
       if (2 == fscanf(file, "%s %d", prefix, &number)) {
         if (prefix_ != prefix) {
           fprintf(stderr, "Prefix in file '%s' mismatches '%s' on commandline. "
                   "Plese fix.\n", prefix, prefix_.c_str());
           exit(1);
         }
+	fprintf(stderr, "hz: strlen(prefix) = %zd ('%s', %d)\n",
+		strlen(prefix), prefix, number);
         prefix_ = prefix;
 	current_serial_ = number;
       } else {
@@ -116,15 +124,21 @@ private:
     } else {
       fprintf(stderr, "New file %s", filename_.c_str());
     }
-    number_len_ = kSerialNumberLen - prefix_.length();
-    max_serial_ = exp(number_len_ * log(10));
+
+    serial_digits_ = kSerialNumberLen - prefix_.length();
+    if (serial_digits_ < kMinSerialNumberDigits) {
+      fprintf(stderr, "Cannot fit at least %d digits in serial number "
+	      "if prefix is '%s'\n", kMinSerialNumberDigits, prefix_.c_str());
+      exit(1);
+    }
+    max_serial_ = exp(serial_digits_ * log(10));
     fprintf(stderr, "Initialized with %s%0*d; number-rollover at %d\n",
-            prefix_.c_str(), number_len_, current_serial_, max_serial_ - 1);
+            prefix_.c_str(), serial_digits_, current_serial_, max_serial_ - 1);
   }
 
   const string filename_;
   string prefix_;
-  int number_len_;
+  int serial_digits_;
   int max_serial_;
   int current_serial_;
 };
