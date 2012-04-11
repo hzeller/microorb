@@ -187,7 +187,6 @@ bool SetAndReadTestSequence(MicroOrb* orb, int column) {
   struct orb_sequence_t test_sequence;
   memset(&test_sequence, 0, sizeof(test_sequence));
 
-  // This USB implementation is a bit flaky. Send a smaller sequence.
   test_sequence.count = kColorSequenceLength;
   for (unsigned char i = 0; i < test_sequence.count; ++i) {
     test_sequence.period[i].morph_time = i;
@@ -323,10 +322,10 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
   for (;;) {
     erase();
     assume_default_colors(COLOR_WHITE,COLOR_BLACK);
-    mvprintw(LINES / 2, COLS / 2 - 13, "[  Waiting for next Orb. ]");
-    mvprintw(LINES / 2 + 1, COLS / 2 - (17 + kSerialNumberLen) / 2,
+    mvprintw(LINES / 2 - 1, COLS / 2 - 13, "[  Waiting for next Orb. ]");
+    mvprintw(LINES / 2, COLS / 2 - (17 + kSerialNumberLen) / 2,
 	     "Upcoming serial# %s", generator->UpcomingNumber().c_str());
-    mvprintw(LINES / 2 + 2, COLS / 2, "");
+    mvprintw(LINES / 2 + 1, COLS / 2, "");
     refresh();
 
     bool success = true;
@@ -350,10 +349,15 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
     refresh();
 
     if (success) success &= SetAndReadTestSequence(orb, print_column);
-    if (success) success &= TestRGBColors(orb, &manual_light_sensor,
-                                          print_column);
     if (success) success &= WriteSerial(orb, force_serial, print_column,
                                         generator);
+    // At this point we know that things work electrically and on the USB bus.
+    // Now display the RGB colors for the human tester to verify.
+    // We do this at the end: the tester knows that (s)he can safely unplug
+    // the Orb afterwards. Also, if the color sequence does not show up, we
+    // know something is wrong without looking at the screen.
+    if (success) success &= TestRGBColors(orb, &manual_light_sensor,
+                                          print_column);
 
     DisplayTestResultMessage(success, print_column);
     WaitForOrbDisconnect();
