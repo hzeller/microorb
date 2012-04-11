@@ -84,11 +84,16 @@ public:
 
   const string& GetPrefix() const { return prefix_; }
 
-  string GenerateNextNumber() {
+  string UpcomingNumber() const {
     char buffer[kSerialNumberLen + 1];
     sprintf(buffer, "%s%0*d", prefix_.c_str(), serial_digits_, current_serial_);
-    current_serial_ = (current_serial_ + 1) % max_serial_;
     return buffer;
+  }
+
+  string GenerateNextNumber() {
+    string result = UpcomingNumber();
+    current_serial_ = (current_serial_ + 1) % max_serial_;
+    return result;
   }
 
   void Store() {
@@ -122,7 +127,7 @@ private:
       }
       fclose(file);
     } else {
-      fprintf(stderr, "New file %s", filename_.c_str());
+      fprintf(stderr, "New file '%s'\nxs", filename_.c_str());
     }
 
     serial_digits_ = kSerialNumberLen - prefix_.length();
@@ -220,7 +225,7 @@ bool SetAndReadTestSequence(MicroOrb* orb, int column) {
   return success;
 }
 
-void DisplaySuccessMessage(bool success, int column) {
+void DisplayTestResultMessage(bool success, int column) {
   assume_default_colors(COLOR_BLACK, success ? COLOR_GREEN : COLOR_RED);
   const char** banner = success ? ok_banner : fail_banner;
   const int banner_lines = 6;
@@ -318,7 +323,10 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
   for (;;) {
     erase();
     assume_default_colors(COLOR_WHITE,COLOR_BLACK);
-    mvprintw(LINES / 2, COLS / 2 - 10, "[  Waiting for next Orb.  ]");
+    mvprintw(LINES / 2, COLS / 2 - 13, "[  Waiting for next Orb. ]");
+    mvprintw(LINES / 2 + 1, COLS / 2 - (17 + kSerialNumberLen) / 2,
+	     "Upcoming serial# %s", generator->UpcomingNumber().c_str());
+    mvprintw(LINES / 2 + 2, COLS / 2, "");
     refresh();
 
     bool success = true;
@@ -347,19 +355,19 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
     if (success) success &= WriteSerial(orb, force_serial, print_column,
                                         generator);
 
-    DisplaySuccessMessage(success, print_column);
+    DisplayTestResultMessage(success, print_column);
     WaitForOrbDisconnect();
   }
 }
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
-    fprintf(stderr, "Usage: %s <filename> <serial-prefix>\n", argv[0]);
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s <serial-prefix>\n", argv[0]);
     return 1;
   }
-  const string filename = argv[1];
-  const string commandline_prefix = argv[2];
-  PersistentSerialGenerator generator(filename, commandline_prefix);
+  const string serial_prefix = argv[1];
+  const string filename = "serial-" + serial_prefix + ".txt";
+  PersistentSerialGenerator generator(filename, serial_prefix);
 
   initscr();
   start_color();
