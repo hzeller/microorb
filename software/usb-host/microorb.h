@@ -1,6 +1,7 @@
-// Copyright 2008 Google Inc. All Rights Reserved.
-// Author: hzeller@google.com (Henner Zeller)
-//
+// Copyright (c) 2008 Henner Zeller <h.zeller@acm.org>
+// This software is free software; you can redistribute it and/or modify it
+// under the terms of the GNU General Public License version 2, as published
+// by the Free Software Foundation <http://www.gnu.org/copyleft/>.
 
 #ifndef TESTING_ORB_DRIVERS_MICROORB_MICROORB_H_
 #define TESTING_ORB_DRIVERS_MICROORB_MICROORB_H_

@@ -1,7 +1,9 @@
-/* USB orb with an attiny44
- * (c) 2008 Henner Zeller <h.zeller@acm.org>
- * This softare is GPL licensed.
+/* Copyright (c) 2008 Henner Zeller <h.zeller@acm.org>
+ * This software is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License version 2, as published
+ * by the Free Software Foundation <http://www.gnu.org/copyleft/>.
  *
+ * USB orb with an attiny44
  * We have 4k flash and 256 bytes RAM (of which are already ~1700 bytes flash
  * and ~50 bytes RAM used by the USB implementation), but want all the following
  * Features.
