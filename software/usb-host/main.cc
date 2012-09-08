@@ -46,7 +46,7 @@ static int usage(const char *prog) {
           " capabilities.\n"
           " -g                : Get current color.\n"
           " -G                : Get current sequence if supported.\n"
-          " -P <port>         : HTTP-service (experimental)\n"
+          " -P <port>         : HTTP-service on port (experimental)\n"
           " -S <sequence>     : Replace startup sequence with given.\n"
           " -v                : Verbose.\n"
           " -x <1|on|0|off>   : Switch aux on/off\n",

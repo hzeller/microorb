@@ -15,7 +15,13 @@
 
 #define STATE_FILE "state.txt"
 
+// Size of sequence to set for sequence set/get test. Since there seem to
+// be trouble with the USB synchronization sometimes, we don't go the full
+// length of 16 but a bit shorter.
+static const int kColorSequenceLength = 16;
+
 static const int kSerialNumberLen = 7;
+static const int kMinSerialNumberDigits = 3;
 
 using std::string;
 
@@ -39,11 +45,6 @@ static const char* ok_banner[] = {
 
 // For human consumption, this should not be too bright.
 static const int kRGBTestBrightness = 0x0f;
-
-// Size of sequence to set for sequence set/get test. Since there seem to
-// be trouble with the USB synchronization sometimes, we don't go the full
-// length of 16 but a bit shorter.
-static const int kColorSequenceLength = 16;
 
 // A Light-sensor to determine if the LED is doing what we expect.
 class LightSensor {
@@ -72,17 +73,27 @@ public:
                             const string& prefix)
     : filename_(filename), prefix_(prefix),
       current_serial_(0) {
+    if (prefix.length() >= kSerialNumberLen) {
+      fprintf(stderr, "Prefix too long: '%s' longer than max serial len %d\n",
+	      prefix.c_str(), kSerialNumberLen);
+      exit(1);
+    }
     Init();
     Store();
   }
 
   const string& GetPrefix() const { return prefix_; }
 
-  string GenerateNextNumber() {
+  string UpcomingNumber() const {
     char buffer[kSerialNumberLen + 1];
-    sprintf(buffer, "%s%0*d", prefix_.c_str(), number_len_, current_serial_);
-    current_serial_ = (current_serial_ + 1) % max_serial_;
+    sprintf(buffer, "%s%0*d", prefix_.c_str(), serial_digits_, current_serial_);
     return buffer;
+  }
+
+  string GenerateNextNumber() {
+    string result = UpcomingNumber();
+    current_serial_ = (current_serial_ + 1) % max_serial_;
+    return result;
   }
 
   void Store() {
@@ -100,13 +111,15 @@ private:
     FILE* file = fopen(filename_.c_str(), "r");
     if (file) {
       char prefix[kSerialNumberLen + 1];
-      int number;
+      int number = -1;
       if (2 == fscanf(file, "%s %d", prefix, &number)) {
         if (prefix_ != prefix) {
           fprintf(stderr, "Prefix in file '%s' mismatches '%s' on commandline. "
                   "Plese fix.\n", prefix, prefix_.c_str());
           exit(1);
         }
+	fprintf(stderr, "hz: strlen(prefix) = %zd ('%s', %d)\n",
+		strlen(prefix), prefix, number);
         prefix_ = prefix;
 	current_serial_ = number;
       } else {
@@ -114,17 +127,23 @@ private:
       }
       fclose(file);
     } else {
-      fprintf(stderr, "New file %s", filename_.c_str());
+      fprintf(stderr, "New file '%s'\nxs", filename_.c_str());
     }
-    number_len_ = kSerialNumberLen - prefix_.length();
-    max_serial_ = exp(number_len_ * log(10));
+
+    serial_digits_ = kSerialNumberLen - prefix_.length();
+    if (serial_digits_ < kMinSerialNumberDigits) {
+      fprintf(stderr, "Cannot fit at least %d digits in serial number "
+	      "if prefix is '%s'\n", kMinSerialNumberDigits, prefix_.c_str());
+      exit(1);
+    }
+    max_serial_ = exp(serial_digits_ * log(10));
     fprintf(stderr, "Initialized with %s%0*d; number-rollover at %d\n",
-            prefix_.c_str(), number_len_, current_serial_, max_serial_ - 1);
+            prefix_.c_str(), serial_digits_, current_serial_, max_serial_ - 1);
   }
 
   const string filename_;
   string prefix_;
-  int number_len_;
+  int serial_digits_;
   int max_serial_;
   int current_serial_;
 };
@@ -168,7 +187,6 @@ bool SetAndReadTestSequence(MicroOrb* orb, int column) {
   struct orb_sequence_t test_sequence;
   memset(&test_sequence, 0, sizeof(test_sequence));
 
-  // This USB implementation is a bit flaky. Send a smaller sequence.
   test_sequence.count = kColorSequenceLength;
   for (unsigned char i = 0; i < test_sequence.count; ++i) {
     test_sequence.period[i].morph_time = i;
@@ -206,7 +224,7 @@ bool SetAndReadTestSequence(MicroOrb* orb, int column) {
   return success;
 }
 
-void DisplaySuccessMessage(bool success, int column) {
+void DisplayTestResultMessage(bool success, int column) {
   assume_default_colors(COLOR_BLACK, success ? COLOR_GREEN : COLOR_RED);
   const char** banner = success ? ok_banner : fail_banner;
   const int banner_lines = 6;
@@ -304,7 +322,10 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
   for (;;) {
     erase();
     assume_default_colors(COLOR_WHITE,COLOR_BLACK);
-    mvprintw(LINES / 2, COLS / 2 - 10, "[  Waiting for next Orb.  ]");
+    mvprintw(LINES / 2 - 1, COLS / 2 - 13, "[  Waiting for next Orb. ]");
+    mvprintw(LINES / 2, COLS / 2 - (17 + kSerialNumberLen) / 2,
+	     "Upcoming serial# %s", generator->UpcomingNumber().c_str());
+    mvprintw(LINES / 2 + 1, COLS / 2, "");
     refresh();
 
     bool success = true;
@@ -328,24 +349,29 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
     refresh();
 
     if (success) success &= SetAndReadTestSequence(orb, print_column);
-    if (success) success &= TestRGBColors(orb, &manual_light_sensor,
-                                          print_column);
     if (success) success &= WriteSerial(orb, force_serial, print_column,
                                         generator);
+    // At this point we know that things work electrically and on the USB bus.
+    // Now display the RGB colors for the human tester to verify.
+    // We do this at the end: the tester knows that (s)he can safely unplug
+    // the Orb afterwards. Also, if the color sequence does not show up, we
+    // know something is wrong without looking at the screen.
+    if (success) success &= TestRGBColors(orb, &manual_light_sensor,
+                                          print_column);
 
-    DisplaySuccessMessage(success, print_column);
+    DisplayTestResultMessage(success, print_column);
     WaitForOrbDisconnect();
   }
 }
 
 int main(int argc, char **argv) {
-  if (argc != 3) {
-    fprintf(stderr, "Usage: %s <filename> <serial-prefix>\n", argv[0]);
+  if (argc != 2) {
+    fprintf(stderr, "Usage: %s <serial-prefix>\n", argv[0]);
     return 1;
   }
-  const string filename = argv[1];
-  const string commandline_prefix = argv[2];
-  PersistentSerialGenerator generator(filename, commandline_prefix);
+  const string serial_prefix = argv[1];
+  const string filename = "serial-" + serial_prefix + ".txt";
+  PersistentSerialGenerator generator(filename, serial_prefix);
 
   initscr();
   start_color();

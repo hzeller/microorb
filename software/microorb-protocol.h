@@ -21,7 +21,7 @@
 //      uchar red;
 //      uchar green;
 //      uchar blue;
-//      uchar morph_time;  // time to morph to the this color in 250ms steps
+//      uchar morph_time;  // time to morph to this color in 250ms steps
 //      uchar hold_time;   // time to hold this color in 250ms steps
 //  } sequence[sequence_elements];
 // }
