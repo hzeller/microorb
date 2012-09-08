@@ -36,8 +36,7 @@ static int usage(const char *prog) {
   fprintf(stderr,
           "usage: %s [options] <RGB-Hex>[:<morph-ms>[:<hold-ms>]] [<RGB>...]\n"
           "Just supply a list of one or more hex colors like: FF0000\n"
-          ".. or with transition times: FF0000:500:3000 00FF00:500:3000\n"
-          "\n\thttp://go/microorb/manual\n\n"
+          ".. or with transition times: FF0000:500:3000 00FF00:500:3000\n\n"
           "Options:\n"
           " -s <orb-serial>   : Address a MicroOrb with a particular"
           " serial#.\n"
@@ -47,7 +46,8 @@ static int usage(const char *prog) {
           " capabilities.\n"
           " -g                : Get current color.\n"
           " -G                : Get current sequence if supported.\n"
-	  // -S : setting initial sequence. Not officially listed.
+          " -P <port>         : HTTP-service (experimental)\n"
+          " -S                : Setting initial sequence.\n"
           " -v                : Verbose.\n"
           " -x <1|on|0|off>   : Switch aux on/off\n",
           prog);
@@ -231,6 +231,8 @@ bool GetResource(const string &name, int *size, const char **data) {
 int HandleHttp(void* cls, struct MHD_Connection *connection,
                const char *url, const char *method, const char *version,
                const char *upload_data, size_t *upload_size, void**) {
+  // Not cool yet; should pre-set to the current color and also should start
+  // out showing the color-chooser, not only the input-field.
   string result;
   struct MHD_Response *response;
   int ret;
