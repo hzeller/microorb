@@ -15,8 +15,8 @@ static const int kMaxSequenceLen = 16;  // Max number of colors sent to Orb.
 static const int kUsbTimeoutMs = 1500;
 
 // The timing in the orb firmware is tight and we seem to service the USB
-// interrupts not always in time - which leads to broken communication on the
-// bus sometimes if we send long sequences.
+// interrupts not always in time in the microcontroller - which leads to
+// broken communication on the bus sometimes if we send long sequences.
 // So allow for some retries in case of failures.
 static const int kUsbRetries = 25;      // Retries in case of usb bus error.
 

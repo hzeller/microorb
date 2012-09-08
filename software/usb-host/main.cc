@@ -7,23 +7,21 @@
 //
 // This requires libusb (tested on Linux and MacOS)
 
+#include <arpa/inet.h>
+#include <assert.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <unistd.h>
-#include <fcntl.h>
 
 #include <map>
 #include <string>
 
-#include <sys/types.h>
-#include <sys/select.h>
-#include <sys/socket.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-
-typedef unsigned long long uint64_t;
 #include <microhttpd.h>
 
 #include "microorb.h"
@@ -31,6 +29,12 @@ typedef unsigned long long uint64_t;
 using orb_driver::MicroOrb;
 using std::string;
 using std::map;
+
+// Parameters we pass to the daemon.
+struct HttpServingParameters {
+  MicroOrb *orb;
+  bool verbose;
+};
 
 static int usage(const char *prog) {
   fprintf(stderr,
@@ -220,6 +224,7 @@ bool GetResource(const string &name, int *size, const char **data) {
       result->append(buffer, r);
     }
     close(fd);
+    // We only have a handful resources. Cache into and serve from memory.
     resources[resource_name] = result;
   }
 
@@ -228,34 +233,73 @@ bool GetResource(const string &name, int *size, const char **data) {
   return true;
 }
 
-int HandleHttp(void* cls, struct MHD_Connection *connection,
-               const char *url, const char *method, const char *version,
-               const char *upload_data, size_t *upload_size, void**) {
+// MicroHTTP chops up the URI to parameters. However, we want to log them
+// so save a copy beforehand.
+static void *HttpSaveUri(void *user_argument, const char *uri) {
+  HttpServingParameters *params = (HttpServingParameters*) user_argument;
+  return params->verbose ? strdup(uri) : NULL;
+}
+
+static void WriteLog(struct MHD_Connection *connection, const char *method,
+                     const char *logging_uri) {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  struct tm *tmp = localtime(&tv.tv_sec);
+  char time_buf[20];
+  strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", tmp);
+  char ip_buf[INET6_ADDRSTRLEN];
+  // mmh, micro-http only supports IPv4 here ? One would hope for generic
+  // struct sockaddr
+  const struct sockaddr_in *client
+    = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS,
+                              MHD_OPTION_END)->client_addr;
+  inet_ntop(AF_INET, &client->sin_addr, ip_buf, sizeof(ip_buf));
+  fprintf(stderr, "%s.%06ld\t%s\t%s %s\n", time_buf, tv.tv_usec, ip_buf,
+          method, logging_uri);
+}
+
+static int HandleHttp(void* user_argument,
+                      struct MHD_Connection *connection,
+                      const char *url, const char *method, const char *version,
+                      const char *upload_data, size_t *upload_size,
+                      void** allocated_logging_uri) {
   // Not cool yet; should pre-set to the current color and also should start
   // out showing the color-chooser, not only the input-field.
+  // So someone please poke in the web-resource/ directory to make this nice.
+  // (Also, right now we only support one color to set; maybe we can hack
+  // the client javascript to provide a 'UI' that allows setting a sequence?)
+
+  HttpServingParameters *params = (HttpServingParameters*) user_argument;
   string result;
   struct MHD_Response *response;
   int ret;
+  
+  if (params->verbose) {
+    assert(allocated_logging_uri);
+    WriteLog(connection, method, (const char*) *allocated_logging_uri);
+    free(*allocated_logging_uri);
+  }
+
+  // Setting color. We get
   if (strcmp(url, "/set") == 0) {
-    string color = "000000";
-    MHD_get_connection_values (connection, MHD_GET_ARGUMENT_KIND,
-                               &AcceptColorParam, &color);
     struct orb_sequence_t seq;
     const char *args[1];
-    args[0] = color.c_str();
+    const char *color_arg
+      = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "c");
+    args[0] = color_arg ? color_arg : "000000";
     if (!ParseSequence(args, 1, &seq)) {
       response = MHD_create_response_from_data(4, (void*)"FAIL",
                                                MHD_NO, MHD_NO);
       ret = MHD_queue_response(connection, MHD_HTTP_BAD_REQUEST, response);
     } else {
-      MicroOrb *orb = (MicroOrb*) cls;
-      orb->SetSequence(seq);
+      params->orb->SetSequence(seq);
       response = MHD_create_response_from_data(2, (void*)"OK",
                                                MHD_NO, MHD_NO);
       ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
     }
   }
   else {
+    // Serve any static content.
     int size;
     const char *buffer;
     if (GetResource(url, &size, &buffer)) {
@@ -362,8 +406,13 @@ int main(int argc, char **argv) {
 
   if (port > 0 && mode == HTTP_SERVICE) {
     struct MHD_Daemon *daemon;
-    daemon = MHD_start_daemon (MHD_USE_SELECT_INTERNALLY, port, NULL, NULL, 
-                               &HandleHttp, orb, MHD_OPTION_END);
+    struct HttpServingParameters params;
+    params.orb = orb;
+    params.verbose = verbose;
+    daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY, port, NULL, NULL, 
+                              &HandleHttp, &params,
+                              MHD_OPTION_URI_LOG_CALLBACK, &HttpSaveUri, &params,
+                              MHD_OPTION_END);
     if (NULL == daemon) return 1;
     for (;;) getchar();
     MHD_stop_daemon(daemon);

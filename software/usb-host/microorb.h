@@ -3,8 +3,8 @@
 // under the terms of the GNU General Public License version 2, as published
 // by the Free Software Foundation <http://www.gnu.org/copyleft/>.
 
-#ifndef TESTING_ORB_DRIVERS_MICROORB_MICROORB_H_
-#define TESTING_ORB_DRIVERS_MICROORB_MICROORB_H_
+#ifndef ORB_DRIVERS_MICROORB_H_
+#define ORB_DRIVERS_MICROORB_H_
 
 #include "../microorb-protocol.h"
 
@@ -100,4 +100,4 @@ class MicroOrb {
 
 }  // end namespace orb_driver
 
-#endif  // TESTING_ORB_DRIVERS_MICROORB_MICROORB_H_
+#endif  // ORB_DRIVERS_MICROORB_H_
