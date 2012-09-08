@@ -50,7 +50,8 @@ static int usage(const char *prog) {
           " capabilities.\n"
           " -g                : Get current color.\n"
           " -G                : Get current sequence if supported.\n"
-          " -P <port>         : HTTP-service on port (experimental)\n"
+          " -P <port>         : HTTP-service on port (experimental).\n"
+          "                       -v prints HTTP access log.\n"
           " -S <sequence>     : Replace startup sequence with given.\n"
           " -v                : Verbose.\n"
           " -x <1|on|0|off>   : Switch aux on/off\n",
@@ -240,8 +241,8 @@ static void *HttpSaveUri(void *user_argument, const char *uri) {
   return params->verbose ? strdup(uri) : NULL;
 }
 
-static void WriteLog(struct MHD_Connection *connection, const char *method,
-                     const char *logging_uri) {
+static void WriteHttpLog(struct MHD_Connection *connection, const char *method,
+                         const char *logging_uri) {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   struct tm *tmp = localtime(&tv.tv_sec);
@@ -266,8 +267,11 @@ static int HandleHttp(void* user_argument,
   // Not cool yet; should pre-set to the current color and also should start
   // out showing the color-chooser, not only the input-field.
   // So someone please poke in the web-resource/ directory to make this nice.
-  // (Also, right now we only support one color to set; maybe we can hack
-  // the client javascript to provide a 'UI' that allows setting a sequence?)
+  // ( Maybe add a #<current-color> to the URL, so that the index.html can
+  //   pick it up ?
+  //   Also, right now we only support one color to set; maybe we can hack
+  //   the client javascript to provide a 'UI' that allows setting a sequence?
+  //   ... lots to do for people liking to hack JavaScript).
 
   HttpServingParameters *params = (HttpServingParameters*) user_argument;
   string result;
@@ -276,11 +280,11 @@ static int HandleHttp(void* user_argument,
   
   if (params->verbose) {
     assert(allocated_logging_uri);
-    WriteLog(connection, method, (const char*) *allocated_logging_uri);
+    WriteHttpLog(connection, method, (const char*) *allocated_logging_uri);
     free(*allocated_logging_uri);
   }
 
-  // Setting color. We get
+  // Setting color that we get via query-paramter 'c'
   if (strcmp(url, "/set") == 0) {
     struct orb_sequence_t seq;
     const char *args[1];
@@ -299,7 +303,7 @@ static int HandleHttp(void* user_argument,
     }
   }
   else {
-    // Serve any static content.
+    // Everything else: serve any static content.
     int size;
     const char *buffer;
     if (GetResource(url, &size, &buffer)) {
