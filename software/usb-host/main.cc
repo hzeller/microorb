@@ -1,3 +1,4 @@
+// -*- mode: c++; c-basic-offset: 2; indent-tabs-mode: nil; -*-
 // Copyright (c) 2008 Henner Zeller <h.zeller@acm.org>
 // This software is free software; you can redistribute it and/or modify it
 // under the terms of the GNU General Public License version 2, as published
@@ -197,7 +198,7 @@ static void FormatSequence(const struct orb_sequence_t *seq) {
   fprintf(stderr, "\n");
 }
 
-int AcceptColorParam (void *cls, enum MHD_ValueKind kind, 
+int AcceptColorParam (void *cls, enum MHD_ValueKind kind,
                       const char *key, const char *value)
 {
   if (strcmp(key, "c") == 0) {
@@ -241,6 +242,12 @@ static void *HttpSaveUri(void *user_argument, const char *uri) {
   return params->verbose ? strdup(uri) : NULL;
 }
 
+void *extract_addr(const struct sockaddr *sa) {
+  return (sa->sa_family == AF_INET)
+    ? (void*) &(((struct sockaddr_in*)sa)->sin_addr)
+    : (void*) &(((struct sockaddr_in6*)sa)->sin6_addr);
+}
+
 static void WriteHttpLog(struct MHD_Connection *connection, const char *method,
                          const char *logging_uri) {
   struct timeval tv;
@@ -249,12 +256,10 @@ static void WriteHttpLog(struct MHD_Connection *connection, const char *method,
   char time_buf[20];
   strftime(time_buf, sizeof(time_buf), "%Y-%m-%d %H:%M:%S", tmp);
   char ip_buf[INET6_ADDRSTRLEN];
-  // mmh, micro-http only supports IPv4 here ? One would hope for generic
-  // struct sockaddr
-  const struct sockaddr_in *client
+  const struct sockaddr *client
     = MHD_get_connection_info(connection, MHD_CONNECTION_INFO_CLIENT_ADDRESS,
                               MHD_OPTION_END)->client_addr;
-  inet_ntop(AF_INET, &client->sin_addr, ip_buf, sizeof(ip_buf));
+  inet_ntop(client->sa_family, extract_addr(client), ip_buf, sizeof(ip_buf));
   fprintf(stderr, "%s.%06ld\t%s\t%s %s\n", time_buf, tv.tv_usec, ip_buf,
           method, logging_uri);
 }
@@ -277,7 +282,7 @@ static int HandleHttp(void* user_argument,
   string result;
   struct MHD_Response *response;
   int ret;
-  
+
   if (params->verbose) {
     assert(allocated_logging_uri);
     WriteHttpLog(connection, method, (const char*) *allocated_logging_uri);
@@ -292,13 +297,13 @@ static int HandleHttp(void* user_argument,
       = MHD_lookup_connection_value(connection, MHD_GET_ARGUMENT_KIND, "c");
     args[0] = color_arg ? color_arg : "000000";
     if (!ParseSequence(args, 1, &seq)) {
-      response = MHD_create_response_from_data(4, (void*)"FAIL",
-                                               MHD_NO, MHD_NO);
+      response = MHD_create_response_from_buffer(4, (void*)"FAIL",
+                                                 MHD_RESPMEM_PERSISTENT);
       ret = MHD_queue_response(connection, MHD_HTTP_BAD_REQUEST, response);
     } else {
       params->orb->SetSequence(seq);
-      response = MHD_create_response_from_data(2, (void*)"OK",
-                                               MHD_NO, MHD_NO);
+      response = MHD_create_response_from_buffer(2, (void*)"OK",
+                                                 MHD_RESPMEM_PERSISTENT);
       ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
     }
   }
@@ -307,11 +312,12 @@ static int HandleHttp(void* user_argument,
     int size;
     const char *buffer;
     if (GetResource(url, &size, &buffer)) {
-      response = MHD_create_response_from_data(size, (void*) buffer,
-                                               MHD_NO, MHD_NO);
+      response = MHD_create_response_from_buffer(size, (void*) buffer,
+                                                 MHD_RESPMEM_PERSISTENT);
       ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
     } else {
-      response = MHD_create_response_from_data(0, (void*)"", MHD_NO, MHD_NO);
+      response = MHD_create_response_from_buffer(0, (void*)"",
+                                                 MHD_RESPMEM_PERSISTENT);
       ret = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, NULL);
     }
   }
@@ -337,47 +343,47 @@ int main(int argc, char **argv) {
   int opt;
   while ((opt = getopt(argc, argv, "gGvhlSs:x:P:")) != -1) {
     switch (opt) {
-      case 'l':
-        mode = LIST_DEVICES;
-        break;
+    case 'l':
+      mode = LIST_DEVICES;
+      break;
 
-      case 'g':
-        mode = GET_COLOR;
-        break;
+    case 'g':
+      mode = GET_COLOR;
+      break;
 
-      case 'G':
-        mode = GET_SEQUENCE;
-        break;
+    case 'G':
+      mode = GET_SEQUENCE;
+      break;
 
-      case 's':
-        request_serial = strdup(optarg);
-        break;
+    case 's':
+      request_serial = strdup(optarg);
+      break;
 
-      case 'S':
-	mode = SET_INITIAL_SEQUENCE;
-	break;
+    case 'S':
+      mode = SET_INITIAL_SEQUENCE;
+      break;
 
-      case 'h':
-        usage(argv[0]);
-        return 0;
+    case 'h':
+      usage(argv[0]);
+      return 0;
 
-      case 'v':
-        verbose = 1;
-        break;
+    case 'v':
+      verbose = 1;
+      break;
 
-      case 'x':
-        mode = SET_AUX;
-        if (!ParseAuxValue(optarg, &aux_value))
-          return usage(argv[0]);
-        break;
-
-      case 'P':
-        mode = HTTP_SERVICE;
-        port = atoi(optarg);
-        break;
-
-      default:
+    case 'x':
+      mode = SET_AUX;
+      if (!ParseAuxValue(optarg, &aux_value))
         return usage(argv[0]);
+      break;
+
+    case 'P':
+      mode = HTTP_SERVICE;
+      port = atoi(optarg);
+      break;
+
+    default:
+      return usage(argv[0]);
     }
   }
 
@@ -386,11 +392,11 @@ int main(int argc, char **argv) {
 
   if ((mode == SET_COLOR_SEQUENCE || mode == SET_INITIAL_SEQUENCE)
       && arg_num == 0) {
-      // No colors given, show help and list available orbs.
-      usage(argv[0]);
-      fprintf(stderr, "-- Connected orbs --\n");
-      ListAvailableOrbSerials();
-      return 1;
+    // No colors given, show help and list available orbs.
+    usage(argv[0]);
+    fprintf(stderr, "-- Connected orbs --\n");
+    ListAvailableOrbSerials();
+    return 1;
   }
 
   if (mode == LIST_DEVICES) {
@@ -413,7 +419,7 @@ int main(int argc, char **argv) {
     struct HttpServingParameters params;
     params.orb = orb;
     params.verbose = verbose;
-    daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY, port, NULL, NULL, 
+    daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY, port, NULL, NULL,
                               &HandleHttp, &params,
                               MHD_OPTION_URI_LOG_CALLBACK, &HttpSaveUri, &params,
                               MHD_OPTION_END);
