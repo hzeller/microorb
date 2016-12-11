@@ -100,7 +100,7 @@
 <wire x1="36.6776" y1="30.984" x2="39.7256" y2="30.984" width="0.254" layer="47"/>
 <wire x1="36.6776" y1="3.0186" x2="38.2016" y2="3.0186" width="0.254" layer="47" style="shortdash"/>
 <wire x1="37.9476" y1="0.25" x2="39.4716" y2="0.25" width="0.254" layer="47" style="shortdash"/>
-<text x="10.116" y="28.277" size="1.778" layer="21" ratio="15">go/microorb</text>
+<text x="10.116" y="28.277" size="1.778" layer="21" ratio="15">microorb</text>
 <text x="12.1226" y="13.7482" size="1.6764" layer="21" ratio="14">hzeller</text>
 <text x="12.2242" y="16.212" size="1.6764" layer="21" ratio="14">2009</text>
 <text x="3.7406" y="20.4538" size="1.778" layer="16" ratio="20" rot="MR90">hzeller</text>
