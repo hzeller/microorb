@@ -1,5 +1,5 @@
 PROJECT=orb-4
-EAGLE_BIN=/opt/eagle-5.11.0/bin/eagle
+EAGLE_BIN=/opt/eagle-7.7.0/bin/eagle
 
 FAB_DIR=$(PROJECT)-fab
 PRINT_DIR=ps
@@ -53,7 +53,7 @@ all : gerber excellon fab-clean postscript
 
 excellon : prep $(EXCELLON_FILES)
 gerber : prep $(GERBER_FILES)
-postscript : prep $(EPS_FILES) $(SCHEMATIC) $(FAB_DOC) $(ASM_DOC) $(PDF_PANELS)
+postscript : prep $(EPS_FILES) $(SCHEMATIC) $(FAB_DOC) $(ASM_DOC)
 
 clean :
 	rm -f $(GERBER_FILES) $(EXCELLON_FILES) \
