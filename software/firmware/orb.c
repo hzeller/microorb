@@ -185,19 +185,19 @@ static void current_limit_init();
 // content, we switch off current limiting.
 uchar ee_current_limit EEMEM = ~SWITCH_CURRENT_LIMIT_OFF_MAGIC;
 
-// Initial sequence - stored in eeprom. We set it to the Google colors to
+// Initial sequence - stored in eeprom. We set it to some color sequence
 // have some feedback when plugging in the USB.
 // With the POKE_EEPROM it can be set to anything by a knowledgable user ;)
 static struct orb_sequence_t ee_initial_sequence EEMEM = {
     12,
     {
         { { 0x00, 0x00, 0x00 }, 0, 2 },   // initially briefly black.
-        { { 0x00, 0x00, 0xff }, 1, 2 },   // G - blue
-        { { 0xff, 0x00, 0x00 }, 1, 2 },   // o - red
-        { { 0xff, 0xff, 0x00 }, 1, 2 },   // o - yellow
-        { { 0x00, 0x00, 0xff }, 1, 2 },   // g - blue
-        { { 0x00, 0xff, 0x00 }, 1, 2 },   // l - green
-        { { 0xff, 0x00, 0x00 }, 1, 2 },   // e - red
+        { { 0xff, 0x00, 0xff }, 1, 2 },   // red
+        { { 0xff, 0x55, 0x00 }, 1, 2 },   // orange
+        { { 0xff, 0xff, 0x00 }, 1, 2 },   // yellow
+        { { 0x00, 0x00, 0xff }, 1, 2 },   // green
+        { { 0x00, 0xff, 0xff }, 1, 2 },   // green-blue
+        { { 0x00, 0x00, 0xff }, 1, 2 },   // blue
         { { 0x00, 0x00, 0x00 }, 1, 255 }, // black for some time...
         { { 0x00, 0x00, 0x00 }, 0, 255 },
         { { 0x00, 0x00, 0x00 }, 0, 255 },
@@ -545,7 +545,7 @@ static void set_aux(bool value) {
 static void current_limit_init() {
     // See if we have the magic value that switches off USB-bus saving current
     // limiting...
-    do_current_limit = 
+    do_current_limit =
         (eeprom_read_byte(&ee_current_limit) != SWITCH_CURRENT_LIMIT_OFF_MAGIC);
 }
 
