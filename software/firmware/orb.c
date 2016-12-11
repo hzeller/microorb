@@ -1,4 +1,5 @@
-/* Copyright (c) 2008 Henner Zeller <h.zeller@acm.org>
+/* -*- mode: c++; c-basic-offset: 4; indent-tabs-mode: nil; -*-
+ * Copyright (c) 2008 Henner Zeller <h.zeller@acm.org>
  * This software is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 2, as published
  * by the Free Software Foundation <http://www.gnu.org/copyleft/>.
@@ -117,13 +118,13 @@ static bool new_sequence_data = false;
 // have 200Hz * 60s iterations for that). So we need a float representation that
 // is cheap to compute in a microcontroller.
 struct fixedpoint_t {
-  union {
-      struct {
-          uchar padding_[3];
-          uchar pre_dot;
-      } v;
-    uint32_t full_resolution;
-  } value;
+    union {
+        struct {
+            uchar padding_[3];
+            uchar pre_dot;
+        } v;
+        uint32_t full_resolution;
+    } value;
     int32_t scaled_diff;     // Change per step. Scaled to full resolution.
 };
 
@@ -362,10 +363,10 @@ extern byte_t usb_in(byte_t *data, byte_t len) {
 }
 
 static void swap(struct pwm_segment_t *a, struct pwm_segment_t *b) {
-  struct pwm_segment_t tmp;
-  tmp = *b;
-  *b = *a;
-  *a = tmp;
+    struct pwm_segment_t tmp;
+    tmp = *b;
+    *b = *a;
+    *a = tmp;
 }
 
 // for 3 elements, bubblesort is really the simplest and best ;)
