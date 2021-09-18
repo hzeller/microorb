@@ -310,8 +310,9 @@ static HandleHttpResult HandleHttp(void* user_argument,
       ret = MHD_queue_response(connection, MHD_HTTP_BAD_REQUEST, response);
     } else {
       int attempts = 2;
-      while (attempts-- && !params->orb->SetSequence(seq)) {
+      while (attempts-- && (!params->orb || !params->orb->SetSequence(seq))) {
         fprintf(stderr, "Lost connection. Reconnect orb.\n");
+        delete params->orb;
         params->orb = OpenOrb(params->requested_serial);
       }
       response = MHD_create_response_from_buffer(2, (void*)"OK",
