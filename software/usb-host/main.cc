@@ -264,11 +264,18 @@ static void WriteHttpLog(struct MHD_Connection *connection, const char *method,
           method, logging_uri);
 }
 
-static int HandleHttp(void* user_argument,
-                      struct MHD_Connection *connection,
-                      const char *url, const char *method, const char *version,
-                      const char *upload_data, size_t *upload_size,
-                      void** allocated_logging_uri) {
+#if MHD_VERSION >= 0x00097101
+  typedef MHD_Result HandleHttpResult;
+#else
+  typedef int HandleHttpResult;
+#endif
+
+static HandleHttpResult HandleHttp(void* user_argument,
+                                   struct MHD_Connection *connection,
+                                   const char *url,
+                                   const char *method, const char *version,
+                                   const char *upload_data, size_t *upload_size,
+                                   void** allocated_logging_uri) {
   // Not cool yet; should pre-set to the current color and also should start
   // out showing the color-chooser, not only the input-field.
   // So someone please poke in the web-resource/ directory to make this nice.
@@ -281,7 +288,7 @@ static int HandleHttp(void* user_argument,
   HttpServingParameters *params = (HttpServingParameters*) user_argument;
   string result;
   struct MHD_Response *response;
-  int ret;
+  HandleHttpResult ret;
 
   if (params->verbose) {
     assert(allocated_logging_uri);
