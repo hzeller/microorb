@@ -330,7 +330,7 @@ static HandleHttpResult HandleHttp(void* user_argument,
     } else {
       response = MHD_create_response_from_buffer(0, (void*)"",
                                                  MHD_RESPMEM_PERSISTENT);
-      ret = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, NULL);
+      ret = MHD_queue_response(connection, MHD_HTTP_NOT_FOUND, response);
     }
   }
   MHD_destroy_response(response);
