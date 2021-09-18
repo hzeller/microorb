@@ -34,6 +34,7 @@ using std::map;
 // Parameters we pass to the daemon.
 struct HttpServingParameters {
   MicroOrb *orb;
+  const char *requested_serial;
   bool verbose;
 };
 
@@ -308,7 +309,11 @@ static HandleHttpResult HandleHttp(void* user_argument,
                                                  MHD_RESPMEM_PERSISTENT);
       ret = MHD_queue_response(connection, MHD_HTTP_BAD_REQUEST, response);
     } else {
-      params->orb->SetSequence(seq);
+      int attempts = 2;
+      while (attempts-- && !params->orb->SetSequence(seq)) {
+        fprintf(stderr, "Lost connection. Reconnect orb.\n");
+        params->orb = OpenOrb(params->requested_serial);
+      }
       response = MHD_create_response_from_buffer(2, (void*)"OK",
                                                  MHD_RESPMEM_PERSISTENT);
       ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
@@ -425,6 +430,7 @@ int main(int argc, char **argv) {
     struct MHD_Daemon *daemon;
     struct HttpServingParameters params;
     params.orb = orb;
+    params.requested_serial = request_serial;
     params.verbose = verbose;
     daemon = MHD_start_daemon(MHD_USE_SELECT_INTERNALLY, port, NULL, NULL,
                               &HandleHttp, &params,
