@@ -438,7 +438,7 @@ int main(int argc, char **argv) {
                               MHD_OPTION_URI_LOG_CALLBACK, &HttpSaveUri, &params,
                               MHD_OPTION_END);
     if (NULL == daemon) return 1;
-    for (;;) getchar();
+    for (;;) sleep(1000);
     MHD_stop_daemon(daemon);
     return 0;
   }
