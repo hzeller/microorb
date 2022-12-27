@@ -7,9 +7,17 @@ pkgs.mkShell {
   buildInputs = with pkgs;
     [
       gnumake
+
+      # Firmware
+      pkgsCross.avr.buildPackages.gcc8
+      avrdude
+      python
+
+      # Host software
       libmicrohttpd
       libusb-compat-0_1
       ncurses
+
       clang-tools
     ];
 }
