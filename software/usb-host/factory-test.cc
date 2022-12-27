@@ -232,7 +232,7 @@ void DisplayTestResultMessage(bool success, int column) {
   getyx(stdscr, y, dummy);
   const int start_y = (LINES - y - banner_lines) / 2 + y;
   for (int i = 0; i < banner_lines; ++i) {
-    mvprintw(start_y + i + 1, column, banner[i]);
+    mvprintw(start_y + i + 1, column, "%s", banner[i]);
   }
   refresh();
 }
@@ -325,7 +325,7 @@ void RunTestLoop(PersistentSerialGenerator *generator) {
     mvprintw(LINES / 2 - 1, COLS / 2 - 13, "[  Waiting for next Orb. ]");
     mvprintw(LINES / 2, COLS / 2 - (17 + kSerialNumberLen) / 2,
 	     "Upcoming serial# %s", generator->UpcomingNumber().c_str());
-    mvprintw(LINES / 2 + 1, COLS / 2, "");
+    mvprintw(LINES / 2 + 1, COLS / 2, "%s", "");
     refresh();
 
     bool success = true;

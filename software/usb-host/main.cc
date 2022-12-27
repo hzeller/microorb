@@ -265,7 +265,7 @@ static void WriteHttpLog(struct MHD_Connection *connection, const char *method,
           method, logging_uri);
 }
 
-#if MHD_VERSION >= 0x00097101
+#if MHD_VERSION >= 0x00097002
   typedef MHD_Result HandleHttpResult;
 #else
   typedef int HandleHttpResult;
